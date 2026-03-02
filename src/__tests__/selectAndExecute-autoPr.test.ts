@@ -37,8 +37,6 @@ vi.mock('../infra/task/index.js', () => ({
   createSharedClone: vi.fn(),
   autoCommitAndPush: vi.fn(),
   summarizeTaskName: vi.fn(),
-  getCurrentBranch: vi.fn(() => 'main'),
-  detectDefaultBranch: vi.fn(() => 'main'),
   resolveBaseBranch: vi.fn(() => ({ branch: 'main' })),
   TaskRunner: vi.fn(() => ({
     addTask: (...args: unknown[]) => mockAddTask(...args),
@@ -104,6 +102,9 @@ describe('selectAndExecuteTask (execute path)', () => {
 
     expect(mockAutoCommitAndPush).not.toHaveBeenCalled();
     expect(mockAddTask).toHaveBeenCalledWith('test task', { piece: 'default' });
+    expect(mockExecuteTask).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: '/project', projectCwd: '/project' }),
+    );
   });
 
   it('should call selectPiece when no override is provided', async () => {

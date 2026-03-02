@@ -1,9 +1,8 @@
 /**
  * Tests for PR resolution in routing module.
  *
- * Verifies that --pr option fetches review comments,
- * passes formatted task to interactive mode, and sets
- * the branch for worktree checkout.
+ * Verifies that --pr option fetches review comments
+ * and passes formatted task to interactive mode.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -175,7 +174,7 @@ describe('PR resolution in routing', () => {
       );
     });
 
-    it('should set branch in selectOptions from PR headRefName', async () => {
+    it('should execute task after resolving PR review comments', async () => {
       // Given
       mockOpts.pr = 456;
       const prReview = createMockPrReview({ headRefName: 'feat/my-pr-branch' });
@@ -185,13 +184,11 @@ describe('PR resolution in routing', () => {
       // When
       await executeDefaultAction();
 
-      // Then
+      // Then: selectAndExecuteTask is called (branch is no longer passed via selectOptions)
       expect(mockSelectAndExecuteTask).toHaveBeenCalledWith(
         '/test/cwd',
         'summarized task',
-        expect.objectContaining({
-          branch: 'feat/my-pr-branch',
-        }),
+        expect.any(Object),
         undefined,
       );
     });

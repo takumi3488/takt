@@ -14,7 +14,7 @@
 | `-w, --piece <name or path>` | Piece 名または piece YAML ファイルのパス |
 | `-b, --branch <name>` | ブランチ名を指定（省略時は自動生成） |
 | `--pr <number>` | PR 番号を指定してレビューコメントを取得し修正を実行 |
-| `--auto-pr` | PR を作成（インタラクティブ: 確認スキップ、pipeline: PR 有効化） |
+| `--auto-pr` | PR を作成（pipeline モードのみ） |
 | `--draft` | PR をドラフトとして作成（`--auto-pr` または `auto_pr` 設定が必要） |
 | `--skip-git` | ブランチ作成、コミット、プッシュをスキップ（pipeline モード、piece のみ実行） |
 | `--repo <owner/repo>` | リポジトリを指定（PR 作成用） |
@@ -101,9 +101,6 @@ takt --task "Fix bug"
 
 # piece を指定
 takt --task "Add authentication" --piece dual
-
-# PR を自動作成
-takt --task "Fix bug" --auto-pr
 ```
 
 **注意:** 引数として文字列を渡す場合（例: `takt "Add login feature"`）は、初期メッセージとしてインタラクティブモードに入ります。
@@ -119,9 +116,6 @@ takt --issue 6
 
 # Issue + piece 指定
 takt #6 --piece dual
-
-# Issue + PR 自動作成
-takt #6 --auto-pr
 ```
 
 **要件:** [GitHub CLI](https://cli.github.com/)（`gh`）がインストールされ、認証済みである必要があります。

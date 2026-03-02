@@ -1,9 +1,8 @@
 /**
  * Task execution orchestration.
  *
- * Coordinates piece selection and task execution,
- * auto-commit, and PR creation. Extracted from cli.ts to avoid
- * mixing CLI parsing with business logic.
+ * Coordinates piece selection and in-place task execution.
+ * Extracted from cli.ts to avoid mixing CLI parsing with business logic.
  */
 
 import {
@@ -126,11 +125,10 @@ export async function selectAndExecuteTask(
 
   const completedAt = new Date().toISOString();
 
-  const effectiveSuccess = taskSuccess;
   if (taskRecord) {
     const taskResult = buildBooleanTaskResult({
       task: taskRecord,
-      taskSuccess: effectiveSuccess,
+      taskSuccess,
       successResponse: 'Task completed successfully',
       failureResponse: 'Task failed',
       startedAt,
@@ -139,7 +137,7 @@ export async function selectAndExecuteTask(
     persistTaskResult(taskRunner, taskResult);
   }
 
-  if (!effectiveSuccess) {
+  if (!taskSuccess) {
     process.exit(1);
   }
 }

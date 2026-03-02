@@ -14,7 +14,7 @@ This document provides a complete reference for all TAKT CLI commands and option
 | `-w, --piece <name or path>` | Piece name or path to piece YAML file |
 | `-b, --branch <name>` | Specify branch name (auto-generated if omitted) |
 | `--pr <number>` | PR number to fetch review comments and fix |
-| `--auto-pr` | Create PR (interactive: skip confirmation, pipeline: enable PR) |
+| `--auto-pr` | Create PR after execution (pipeline mode only) |
 | `--draft` | Create PR as draft (requires `--auto-pr` or `auto_pr` config) |
 | `--skip-git` | Skip branch creation, commit, and push (pipeline mode, piece-only) |
 | `--repo <owner/repo>` | Specify repository (for PR creation) |
@@ -101,9 +101,6 @@ takt --task "Fix bug"
 
 # Specify piece
 takt --task "Add authentication" --piece dual
-
-# Auto-create PR
-takt --task "Fix bug" --auto-pr
 ```
 
 **Note:** Passing a string as an argument (e.g., `takt "Add login feature"`) enters interactive mode with it as the initial message.
@@ -119,9 +116,6 @@ takt --issue 6
 
 # Issue + piece specification
 takt #6 --piece dual
-
-# Issue + auto-create PR
-takt #6 --auto-pr
 ```
 
 **Requirements:** [GitHub CLI](https://cli.github.com/) (`gh`) must be installed and authenticated.

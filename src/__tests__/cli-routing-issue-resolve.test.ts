@@ -179,6 +179,36 @@ describe('Issue resolution in routing', () => {
     mockExit.mockRestore();
   });
 
+  it('should show error and exit when only --auto-pr is used outside pipeline mode', async () => {
+    mockOpts.autoPr = true;
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+
+    await expect(executeDefaultAction()).rejects.toThrow('process.exit called');
+
+    expect(mockError).toHaveBeenCalledWith('--auto-pr/--draft are supported only in --pipeline mode');
+    expect(mockExit).toHaveBeenCalledWith(1);
+
+    mockExit.mockRestore();
+  });
+
+  it('should show error and exit when only --draft is used outside pipeline mode', async () => {
+    mockOpts.draft = true;
+
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+
+    await expect(executeDefaultAction()).rejects.toThrow('process.exit called');
+
+    expect(mockError).toHaveBeenCalledWith('--auto-pr/--draft are supported only in --pipeline mode');
+    expect(mockExit).toHaveBeenCalledWith(1);
+
+    mockExit.mockRestore();
+  });
+
   it('should show migration error and exit when deprecated --create-worktree is used', async () => {
     mockOpts.createWorktree = 'yes';
 
@@ -221,13 +251,11 @@ describe('Issue resolution in routing', () => {
         undefined,
       );
 
-      // Then: selectAndExecuteTask should receive issues in options
+      // Then: selectAndExecuteTask should be called (issues are used only for initialInput, not selectOptions)
       expect(mockSelectAndExecuteTask).toHaveBeenCalledWith(
         '/test/cwd',
         'summarized task',
-        expect.objectContaining({
-          issues: [issue131],
-        }),
+        expect.any(Object),
         undefined,
       );
     });
@@ -274,13 +302,11 @@ describe('Issue resolution in routing', () => {
         undefined,
       );
 
-      // Then: selectAndExecuteTask should receive issues
+      // Then: selectAndExecuteTask should be called
       expect(mockSelectAndExecuteTask).toHaveBeenCalledWith(
         '/test/cwd',
         'summarized task',
-        expect.objectContaining({
-          issues: [issue131],
-        }),
+        expect.any(Object),
         undefined,
       );
     });
@@ -302,9 +328,8 @@ describe('Issue resolution in routing', () => {
       // Then: no issue fetching should occur
       expect(mockFetchIssue).not.toHaveBeenCalled();
 
-      // Then: selectAndExecuteTask should be called without issues
-      const callArgs = mockSelectAndExecuteTask.mock.calls[0];
-      expect(callArgs?.[2]?.issues).toBeUndefined();
+      // Then: selectAndExecuteTask should be called
+      expect(mockSelectAndExecuteTask).toHaveBeenCalledTimes(1);
     });
 
     it('should enter interactive mode with no input when no args provided', async () => {

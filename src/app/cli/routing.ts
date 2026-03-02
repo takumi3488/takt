@@ -10,7 +10,7 @@ import { getErrorMessage } from '../../shared/utils/index.js';
 import { getLabel } from '../../shared/i18n/index.js';
 import { formatIssueAsTask, parseIssueNumbers, formatPrReviewAsTask } from '../../infra/github/index.js';
 import { getGitProvider } from '../../infra/git/index.js';
-import type { Issue, PrReviewData } from '../../infra/git/index.js';
+import type { PrReviewData } from '../../infra/git/index.js';
 import { selectAndExecuteTask, determinePiece, saveTaskFromInteractive, createIssueAndSaveTask, promptLabelSelection, type SelectAndExecuteOptions } from '../../features/tasks/index.js';
 import { executePipeline } from '../../features/pipeline/index.js';
 import {
@@ -35,13 +35,13 @@ import { loadTaskHistory } from './taskHistory.js';
  * - --issue N option (numeric issue number)
  * - Positional argument containing issue references (#N or "#1 #2")
  *
- * Returns resolved issues and the formatted task text for interactive mode.
+ * Returns the formatted task text for interactive mode.
  * Throws on gh CLI unavailability or fetch failure.
  */
 async function resolveIssueInput(
   issueOption: number | undefined,
   task: string | undefined,
-): Promise<{ issues: Issue[]; initialInput: string } | null> {
+): Promise<{ initialInput: string } | null> {
   if (issueOption) {
     const ghStatus = getGitProvider().checkCliStatus();
     if (!ghStatus.available) {
@@ -52,7 +52,7 @@ async function resolveIssueInput(
       (fetchedIssue) => `GitHub Issue fetched: #${fetchedIssue.number} ${fetchedIssue.title}`,
       async () => getGitProvider().fetchIssue(issueOption),
     );
-    return { issues: [issue], initialInput: formatIssueAsTask(issue) };
+    return { initialInput: formatIssueAsTask(issue) };
   }
 
   if (task && isDirectTask(task)) {
@@ -70,7 +70,7 @@ async function resolveIssueInput(
       (fetchedIssues) => `GitHub Issues fetched: ${fetchedIssues.map((issue) => `#${issue.number}`).join(', ')}`,
       async () => issueNumbers.map((n) => getGitProvider().fetchIssue(n)),
     );
-    return { issues, initialInput: issues.map(formatIssueAsTask).join('\n\n---\n\n') };
+    return { initialInput: issues.map(formatIssueAsTask).join('\n\n---\n\n') };
   }
 
   return null;
@@ -80,12 +80,12 @@ async function resolveIssueInput(
  * Resolve PR review comments from `--pr` option.
  *
  * Fetches review comments and metadata, formats as task text.
- * Returns the PR branch name for checkout and the formatted task.
+ * Returns the formatted task text for interactive mode.
  * Throws on gh CLI unavailability or fetch failure.
  */
 async function resolvePrInput(
   prNumber: number,
-): Promise<{ initialInput: string; prBranch: string }> {
+): Promise<{ initialInput: string }> {
   const ghStatus = getGitProvider().checkCliStatus();
   if (!ghStatus.available) {
     throw new Error(ghStatus.error);
@@ -101,10 +101,7 @@ async function resolvePrInput(
     throw new Error(`PR #${prNumber} has no review comments`);
   }
 
-  return {
-    initialInput: formatPrReviewAsTask(prReview),
-    prBranch: prReview.headRefName,
-  };
+  return { initialInput: formatPrReviewAsTask(prReview) };
 }
 
 /**
@@ -146,7 +143,6 @@ export async function executeDefaultAction(task?: string): Promise<void> {
     ? true
     : (resolveConfigValue(resolvedCwd, 'draftPr') ?? false);
   const selectOptions: SelectAndExecuteOptions = {
-    repo: opts.repo as string | undefined,
     piece: opts.piece as string | undefined,
   };
 
@@ -190,7 +186,6 @@ export async function executeDefaultAction(task?: string): Promise<void> {
     try {
       const prResult = await resolvePrInput(prNumber);
       initialInput = prResult.initialInput;
-      selectOptions.branch = prResult.prBranch;
     } catch (e) {
       logError(getErrorMessage(e));
       process.exit(1);
@@ -200,7 +195,6 @@ export async function executeDefaultAction(task?: string): Promise<void> {
     try {
       const issueResult = await resolveIssueInput(issueNumber, task);
       if (issueResult) {
-        selectOptions.issues = issueResult.issues;
         initialInput = issueResult.initialInput;
       }
     } catch (e) {
