@@ -288,10 +288,10 @@ TAKTのデータフローは以下の7つの主要なレイヤーで構成され
 │               ▼                                                 │
 │  ┌────────────────────────────────────────┐                    │
 │  │ Provider.call()                        │                    │
-│  │  (ClaudeProvider / CodexProvider)      │                    │
+│  │  (Claude / Codex / OpenCode / etc.)    │                    │
 │  │                                        │                    │
 │  │  - Build system prompt                 │                    │
-│  │  - Call SDK (callClaude / callCodex)   │                    │
+│  │  - Call SDK (provider-specific)        │                    │
 │  │  - Stream handling (onStream callback) │                    │
 │  │  - Error propagation                   │                    │
 │  │                                        │                    │
@@ -669,7 +669,7 @@ const match = await detectMatchedRule(step, response.content, tagContent, {...})
    - プロンプトファイル (`.md`)
 
 2. **プロバイダー取得**:
-   - `getProvider(providerType)`: ClaudeProvider / CodexProvider / MockProvider
+   - `getProvider(providerType)`: Claude / Codex / OpenCode / Cursor / Copilot / Mock
 
 3. **エージェント呼び出し**:
    - `provider.call(agentName, instruction, options)`
@@ -696,11 +696,14 @@ const match = await detectMatchedRule(step, response.content, tagContent, {...})
 
 #### 7.2 Provider (`src/infra/providers/`)
 
-**役割**: AIプロバイダー(Claude, Codex)とのSDK通信
+**役割**: AIプロバイダー(Claude, Codex, OpenCode, Cursor, Copilot)とのSDK通信
 
 **主要なプロバイダー**:
 - `ClaudeProvider`: Claude Code SDK (`@anthropic-ai/claude-agent-sdk`)
-- `CodexProvider`: Codex API
+- `CodexProvider`: Codex SDK (`@openai/codex-sdk`)
+- `OpenCodeProvider`: OpenCode SDK (`@opencode-ai/sdk`)
+- `CursorProvider`: Cursor Agent CLI
+- `CopilotProvider`: GitHub Copilot CLI
 - `MockProvider`: テスト用
 
 **主要メソッド**:
@@ -716,7 +719,7 @@ async call(
 
 **処理内容**:
 1. システムプロンプト構築
-2. SDK呼び出し (`callClaude()` / `callCodex()`)
+2. SDK呼び出し（プロバイダー固有）
 3. ストリーミング処理 (`onStream` callback)
 4. エラーハンドリング
 5. レスポンス変換
@@ -1000,9 +1003,9 @@ function determineNextStepByRules(
 
 ### 7. Provider Response → AgentResponse
 
-**場所**: `src/infra/providers/claude.ts`, `src/infra/providers/codex.ts`
+**場所**: `src/infra/providers/` (各プロバイダー実装)
 
-**入力**: SDKレスポンス (`ClaudeResult`)
+**入力**: SDKレスポンス（プロバイダー固有）
 
 **処理**:
 - `status` 変換

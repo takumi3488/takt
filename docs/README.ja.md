@@ -4,7 +4,7 @@
 
 **T**AKT **A**gent **K**oordination **T**opology — AI コーディングエージェントにレビューループ・プロンプト管理・ガードレールを与え、「とりあえず動くコード」ではなく「品質の高いコード」を出させるツールです。
 
-AI と会話してやりたいことを決め、タスクとして積み、`takt run` で実行します。計画・実装・レビュー・修正のループは YAML の piece ファイルで定義されており、エージェント任せにはしません。Claude Code、Codex、OpenCode、Cursor、Copilot に対応しています。
+AI と会話してやりたいことを決め、タスクとして積み、`takt run` で実行します。計画・実装・レビュー・修正のループは YAML の piece ファイルで定義されており、エージェント任せにはしません。Claude Code、Codex、OpenCode、Cursor、GitHub Copilot CLI に対応しています。
 
 TAKT は TAKT 自身で開発しています（ドッグフーディング）。
 
@@ -22,8 +22,8 @@ TAKT は TAKT 自身で開発しています（ドッグフーディング）。
 
 次のいずれかが必要です。
 
-- **プロバイダー CLI**: [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenCode](https://opencode.ai)、[Cursor Agent](https://docs.cursor.com/)、[GitHub Copilot](https://github.com/features/copilot) のいずれか
-- **API Key 直接利用**: Anthropic / OpenAI / OpenCode / Cursor の API Key があれば CLI は不要です
+- **プロバイダー CLI**: [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://github.com/openai/codex)、[OpenCode](https://opencode.ai)、[Cursor Agent](https://docs.cursor.com/)、[GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli) のいずれか
+- **API Key 直接利用**: Anthropic / OpenAI / OpenCode の API Key があれば CLI は不要です
 
 任意:
 
@@ -167,13 +167,14 @@ model: sonnet       # プロバイダーにそのまま渡されます
 language: ja        # en or ja
 ```
 
-API Key を直接使う場合は、CLI のインストールは不要です。
+API Key を直接使う場合は、CLI のインストールは不要です（Claude、Codex、OpenCode が対象）。
 
 ```bash
 export TAKT_ANTHROPIC_API_KEY=sk-ant-...   # Anthropic (Claude)
 export TAKT_OPENAI_API_KEY=sk-...          # OpenAI (Codex)
 export TAKT_OPENCODE_API_KEY=...           # OpenCode
 export TAKT_CURSOR_API_KEY=...             # Cursor Agent（login 済みなら省略可）
+export TAKT_COPILOT_GITHUB_TOKEN=ghp_...   # GitHub Copilot CLI
 ```
 
 全設定項目・プロバイダープロファイル・モデル解決の詳細は [Configuration Guide](./configuration.ja.md) を参照してください。

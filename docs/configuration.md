@@ -114,8 +114,7 @@ interactive_preview_movements: 3  # Movement previews in interactive mode (0-10,
 | `openai_api_key` | string | - | OpenAI API key for Codex |
 | `opencode_api_key` | string | - | OpenCode API key |
 | `cursor_api_key` | string | - | Cursor API key (optional; login session fallback supported) |
-| `copilot_github_token` | string | - | GitHub token for Copilot authentication |
-| `claude_cli_path` | string | - | Claude Code CLI binary path override (absolute) |
+| `copilot_github_token` | string | - | GitHub token for Copilot CLI authentication |
 | `codex_cli_path` | string | - | Codex CLI binary path override (absolute) |
 | `cursor_cli_path` | string | - | Cursor Agent CLI binary path override (absolute) |
 | `copilot_cli_path` | string | - | Copilot CLI binary path override (absolute) |
@@ -189,8 +188,8 @@ export TAKT_OPENCODE_API_KEY=...
 # For Cursor Agent (optional if cursor-agent login session exists)
 export TAKT_CURSOR_API_KEY=...
 
-# For Copilot (GitHub token)
-export TAKT_COPILOT_GITHUB_TOKEN=...
+# For GitHub Copilot CLI
+export TAKT_COPILOT_GITHUB_TOKEN=ghp_...
 ```
 
 ### Config File
@@ -201,7 +200,7 @@ anthropic_api_key: sk-ant-...  # For Claude
 openai_api_key: sk-...         # For Codex
 opencode_api_key: ...          # For OpenCode
 cursor_api_key: ...            # For Cursor Agent (optional)
-copilot_github_token: ...      # For Copilot (GitHub token)
+copilot_github_token: ghp_...  # For GitHub Copilot CLI
 ```
 
 ### Priority
@@ -214,7 +213,7 @@ Environment variables take precedence over `config.yaml` settings.
 | Codex (OpenAI) | `TAKT_OPENAI_API_KEY` | `openai_api_key` |
 | OpenCode | `TAKT_OPENCODE_API_KEY` | `opencode_api_key` |
 | Cursor Agent | `TAKT_CURSOR_API_KEY` | `cursor_api_key` |
-| Copilot | `TAKT_COPILOT_GITHUB_TOKEN` | `copilot_github_token` |
+| GitHub Copilot CLI | `TAKT_COPILOT_GITHUB_TOKEN` | `copilot_github_token` |
 
 ### Security
 
@@ -223,6 +222,7 @@ Environment variables take precedence over `config.yaml` settings.
 - Add `~/.takt/config.yaml` to your global `.gitignore` if needed.
 - Cursor provider can run without API key when `cursor-agent login` is already configured.
 - If you set an API key, installing the corresponding CLI tool (Claude Code, Codex, OpenCode) is not necessary. TAKT directly calls the respective API.
+- Copilot provider requires the `copilot` CLI to be installed. The GitHub token is used for authentication.
 
 ### CLI Path Overrides
 
@@ -258,7 +258,7 @@ The model used for each movement is resolved with the following priority order (
 
 1. **Piece movement `model`** - Specified in the movement definition in piece YAML
 2. **Global config `model`** - Default model in `~/.takt/config.yaml`
-3. **Provider default** - Falls back to the provider's built-in default (Claude: `sonnet`, Codex: `codex`, OpenCode: provider default, Cursor: CLI default)
+3. **Provider default** - Falls back to the provider's built-in default (Claude: `sonnet`, Codex: `codex`, OpenCode: provider default, Cursor: CLI default, Copilot: CLI default)
 
 ### Provider-specific Model Notes
 
@@ -270,7 +270,7 @@ The model used for each movement is resolved with the following priority order (
 
 **Cursor Agent** forwards `model` directly to `cursor-agent --model <model>`. If omitted, Cursor CLI default is used.
 
-**Copilot** forwards `model` directly to the Copilot CLI `--model <model>` flag. If omitted, Copilot CLI default is used.
+**GitHub Copilot CLI** forwards `model` directly to `copilot --model <model>`. If omitted, Copilot CLI default is used.
 
 ### Example
 
