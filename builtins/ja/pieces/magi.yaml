@@ -2,6 +2,13 @@ name: magi
 description: MAGI合議システム - 3つの観点から分析し多数決で判定
 piece_config:
   provider_options:
+    claude:
+      allowed_tools:
+        - Read
+        - Glob
+        - Grep
+        - WebSearch
+        - WebFetch
     codex:
       network_access: true
     opencode:
@@ -11,13 +18,7 @@ initial_movement: melchior
 movements:
   - name: melchior
     persona: melchior
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - WebSearch
-      - WebFetch
-    instruction_template: |
+    instruction: |
       # MAGI System 起動
 
       ## 審議事項
@@ -47,13 +48,7 @@ movements:
         next: balthasar
   - name: balthasar
     persona: balthasar
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - WebSearch
-      - WebFetch
-    instruction_template: |
+    instruction: |
       # MAGI System 継続
 
       ## 審議事項
@@ -87,13 +82,7 @@ movements:
         next: casper
   - name: casper
     persona: casper
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - WebSearch
-      - WebFetch
-    instruction_template: |
+    instruction: |
       # MAGI System 最終審議
 
       ## 審議事項

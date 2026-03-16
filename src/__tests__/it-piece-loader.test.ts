@@ -81,10 +81,10 @@ describe('Piece Loader IT: builtin piece loading', () => {
     expect(config).toBeNull();
   });
 
-  it('should include and load e2e-test as a builtin piece', () => {
-    expect(builtinNames).toContain('e2e-test');
+  it('should include and load fill-e2e as a builtin piece', () => {
+    expect(builtinNames).toContain('fill-e2e');
 
-    const config = loadPiece('e2e-test', testDir);
+    const config = loadPiece('fill-e2e', testDir);
     expect(config).not.toBeNull();
 
     const planMovement = config!.movements.find((movement) => movement.name === 'plan_test');
@@ -92,17 +92,15 @@ describe('Piece Loader IT: builtin piece loading', () => {
 
     expect(planMovement).toBeDefined();
     expect(implementMovement).toBeDefined();
-    expect(planMovement!.instructionTemplate).toContain('missing E2E tests');
-    expect(implementMovement!.instructionTemplate).toContain('npm run test:e2e:mock');
   });
 
-  it('should load e2e-test as a builtin piece in ja locale', () => {
+  it('should load fill-e2e as a builtin piece in ja locale', () => {
     languageState.value = 'ja';
 
     const jaBuiltinNames = listBuiltinPieceNames(testDir, { includeDisabled: true });
-    expect(jaBuiltinNames).toContain('e2e-test');
+    expect(jaBuiltinNames).toContain('fill-e2e');
 
-    const config = loadPiece('e2e-test', testDir);
+    const config = loadPiece('fill-e2e', testDir);
     expect(config).not.toBeNull();
 
     const planMovement = config!.movements.find((movement) => movement.name === 'plan_test');
@@ -110,8 +108,6 @@ describe('Piece Loader IT: builtin piece loading', () => {
 
     expect(planMovement).toBeDefined();
     expect(implementMovement).toBeDefined();
-    expect(planMovement!.instructionTemplate).toContain('E2Eテスト');
-    expect(implementMovement!.instructionTemplate).toContain('npm run test:e2e:mock');
   });
 });
 
@@ -155,6 +151,49 @@ movements:
     expect(config!.name).toBe('custom-wf');
     expect(config!.movements.length).toBe(1);
     expect(config!.movements[0]!.name).toBe('start');
+  });
+
+  it('should propagate canonical instruction field through loader for movement and loop monitor judge', () => {
+    // Given: project-local piece that uses instruction on both movement and loop monitor judge
+    const piecesDir = join(testDir, '.takt', 'pieces');
+    mkdirSync(piecesDir, { recursive: true });
+
+    writeFileSync(join(piecesDir, 'instruction-canonical.yaml'), `
+name: instruction-canonical
+max_movements: 8
+initial_movement: step1
+
+movements:
+  - name: step1
+    instruction: "Step 1 instruction"
+    rules:
+      - condition: next
+        next: step2
+  - name: step2
+    instruction: "Step 2 instruction"
+    rules:
+      - condition: done
+        next: COMPLETE
+
+loop_monitors:
+  - cycle: [step1, step2]
+    threshold: 2
+    judge:
+      instruction: "Judge instruction"
+      rules:
+        - condition: continue
+          next: step2
+`);
+
+    // When: loading the piece through the integration entry point
+    const config = loadPiece('instruction-canonical', testDir);
+
+    // Then: canonical instruction is available on normalized movement/judge models
+    expect(config).not.toBeNull();
+    const step1 = config!.movements[0] as unknown as Record<string, unknown>;
+    const judge = config!.loopMonitors?.[0]?.judge as unknown as Record<string, unknown>;
+    expect(step1.instruction).toBe('Step 1 instruction');
+    expect(judge.instruction).toBe('Judge instruction');
   });
 });
 
@@ -286,7 +325,7 @@ describe('Piece Loader IT: piece config validation', () => {
   });
 
   it('should preserve edit property on movements (review has no edit: true)', () => {
-    const config = loadPiece('review', testDir);
+    const config = loadPiece('review-default', testDir);
     expect(config).not.toBeNull();
 
     // review: no movement should have edit: true
@@ -346,20 +385,25 @@ describe('Piece Loader IT: parallel movement loading', () => {
     }
   });
 
-  it('should load 4 parallel reviewers from dual piece', () => {
+  it('should load 2-stage parallel reviewers from dual piece', () => {
     const config = loadPiece('dual', testDir);
     expect(config).not.toBeNull();
 
-    const parallelStep = config!.movements.find(
-      (s) => s.parallel && s.parallel.length === 4,
-    );
-    expect(parallelStep).toBeDefined();
+    const reviewers1 = config!.movements.find((s) => s.name === 'reviewers_1');
+    expect(reviewers1).toBeDefined();
+    expect(reviewers1!.parallel!.length).toBe(3);
+    const stage1Names = reviewers1!.parallel!.map((s) => s.name);
+    expect(stage1Names).toContain('arch-review');
+    expect(stage1Names).toContain('frontend-review');
+    expect(stage1Names).toContain('testing-review');
 
-    const subNames = parallelStep!.parallel!.map((s) => s.name);
-    expect(subNames).toContain('arch-review');
-    expect(subNames).toContain('frontend-review');
-    expect(subNames).toContain('security-review');
-    expect(subNames).toContain('qa-review');
+    const reviewers2 = config!.movements.find((s) => s.name === 'reviewers_2');
+    expect(reviewers2).toBeDefined();
+    expect(reviewers2!.parallel!.length).toBe(3);
+    const stage2Names = reviewers2!.parallel!.map((s) => s.name);
+    expect(stage2Names).toContain('security-review');
+    expect(stage2Names).toContain('qa-review');
+    expect(stage2Names).toContain('requirements-review');
   });
 });
 
@@ -529,10 +573,12 @@ movements:
       playwright:
         command: npx
         args: ["-y", "@anthropic-ai/mcp-server-playwright"]
-    allowed_tools:
-      - Read
-      - Bash
-      - mcp__playwright__*
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Bash
+          - mcp__playwright__*
     rules:
       - condition: Done
         next: COMPLETE

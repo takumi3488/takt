@@ -1,11 +1,11 @@
 /**
- * Tests for review piece
+ * Tests for review-default piece
  *
  * Covers:
  * - Piece YAML files (EN/JA) load and pass schema validation
  * - Piece structure: gather -> reviewers (parallel 5) -> supervise -> COMPLETE
  * - All movements have edit: false
- * - All 5 reviewers have Bash in allowed_tools
+ * - All 5 reviewers have Bash in provider_options.claude.allowed_tools
  * - Routing rules for gather and reviewers
  */
 
@@ -18,12 +18,12 @@ import { PieceConfigRawSchema } from '../core/models/index.js';
 const RESOURCES_DIR = join(import.meta.dirname, '../../builtins');
 
 function loadReviewYaml(lang: 'en' | 'ja') {
-  const filePath = join(RESOURCES_DIR, lang, 'pieces', 'review.yaml');
+  const filePath = join(RESOURCES_DIR, lang, 'pieces', 'review-default.yaml');
   const content = readFileSync(filePath, 'utf-8');
   return parseYaml(content);
 }
 
-describe('review piece (EN)', () => {
+describe('review-default piece (EN)', () => {
   const raw = loadReviewYaml('en');
 
   it('should pass schema validation', () => {
@@ -32,7 +32,7 @@ describe('review piece (EN)', () => {
   });
 
   it('should have correct name and initial_movement', () => {
-    expect(raw.name).toBe('review');
+    expect(raw.name).toBe('review-default');
     expect(raw.initial_movement).toBe('gather');
   });
 
@@ -112,10 +112,10 @@ describe('review piece (EN)', () => {
     }
   });
 
-  it('should have Bash in allowed_tools for all 5 reviewers', () => {
+  it('should have Bash in provider_options.claude.allowed_tools for all 5 reviewers', () => {
     const reviewers = raw.movements.find((s: { name: string }) => s.name === 'reviewers');
     for (const sub of reviewers.parallel) {
-      expect(sub.allowed_tools).toContain('Bash');
+      expect(sub.provider_options?.claude?.allowed_tools).toContain('Bash');
     }
   });
 
@@ -126,7 +126,7 @@ describe('review piece (EN)', () => {
   });
 });
 
-describe('review piece (JA)', () => {
+describe('review-default piece (JA)', () => {
   const raw = loadReviewYaml('ja');
 
   it('should pass schema validation', () => {
@@ -135,7 +135,7 @@ describe('review piece (JA)', () => {
   });
 
   it('should have correct name and initial_movement', () => {
-    expect(raw.name).toBe('review');
+    expect(raw.name).toBe('review-default');
     expect(raw.initial_movement).toBe('gather');
   });
 
@@ -169,10 +169,10 @@ describe('review piece (JA)', () => {
     }
   });
 
-  it('should have Bash in allowed_tools for all 5 reviewers', () => {
+  it('should have Bash in provider_options.claude.allowed_tools for all 5 reviewers', () => {
     const reviewers = raw.movements.find((s: { name: string }) => s.name === 'reviewers');
     for (const sub of reviewers.parallel) {
-      expect(sub.allowed_tools).toContain('Bash');
+      expect(sub.provider_options?.claude?.allowed_tools).toContain('Bash');
     }
   });
 

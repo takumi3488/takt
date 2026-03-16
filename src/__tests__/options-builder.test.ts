@@ -7,7 +7,7 @@ function createMovement(overrides: Partial<PieceMovement> = {}): PieceMovement {
   return {
     name: 'reviewers',
     personaDisplayName: 'Reviewers',
-    instructionTemplate: 'review',
+    instruction: 'review',
     passPreviousResponse: false,
     ...overrides,
   };
@@ -39,25 +39,38 @@ function createBuilder(step: PieceMovement, engineOverrides: Partial<PieceEngine
 }
 
 describe('OptionsBuilder.buildBaseOptions', () => {
-  it('resolves permission mode using provider profiles', () => {
+  it('passes permission resolution context for provider profile resolution', () => {
     const step = createMovement();
     const builder = createBuilder(step);
 
     const options = builder.buildBaseOptions(step);
 
-    expect(options.permissionMode).toBe('full');
+    expect(options.permissionMode).toBeUndefined();
+    expect(options.permissionResolution).toEqual({
+      movementName: 'reviewers',
+      requiredPermissionMode: undefined,
+      providerProfiles: {
+        codex: { defaultPermissionMode: 'full' },
+      },
+    });
   });
 
-  it('applies movement requiredPermissionMode as minimum floor', () => {
+  it('includes requiredPermissionMode in permission resolution context', () => {
     const step = createMovement({ requiredPermissionMode: 'full' });
     const builder = createBuilder(step);
 
     const options = builder.buildBaseOptions(step);
 
-    expect(options.permissionMode).toBe('full');
+    expect(options.permissionResolution).toEqual({
+      movementName: 'reviewers',
+      requiredPermissionMode: 'full',
+      providerProfiles: {
+        codex: { defaultPermissionMode: 'full' },
+      },
+    });
   });
 
-  it('uses readonly when provider is not configured', () => {
+  it('still passes permission resolution context when provider is not configured', () => {
     const step = createMovement();
     const builder = createBuilder(step, {
       provider: undefined,
@@ -65,21 +78,28 @@ describe('OptionsBuilder.buildBaseOptions', () => {
     });
 
     const options = builder.buildBaseOptions(step);
-    expect(options.permissionMode).toBe('readonly');
+    expect(options.permissionResolution).toEqual({
+      movementName: 'reviewers',
+      requiredPermissionMode: undefined,
+      providerProfiles: undefined,
+    });
   });
 
-  it('merges provider options with precedence: global < movement < project', () => {
+  it('merges provider options with precedence: global < movement and project/env > movement', () => {
     const step = createMovement({
       providerOptions: {
         codex: { networkAccess: false },
-        claude: { sandbox: { excludedCommands: ['./gradlew'] } },
+        claude: {
+          sandbox: { excludedCommands: ['./gradlew'] },
+          allowedTools: ['Read', 'Edit', 'Bash'],
+        },
       },
     });
     const builder = createBuilder(step, {
       providerOptionsSource: 'project',
       providerOptions: {
         codex: { networkAccess: true },
-        claude: { sandbox: { allowUnsandboxedCommands: true } },
+        claude: { sandbox: { allowUnsandboxedCommands: true }, allowedTools: ['Read', 'Glob'] },
         opencode: { networkAccess: true },
       },
     });
@@ -91,10 +111,32 @@ describe('OptionsBuilder.buildBaseOptions', () => {
       opencode: { networkAccess: true },
       claude: {
         sandbox: {
-          allowUnsandboxedCommands: true,
           excludedCommands: ['./gradlew'],
+          allowUnsandboxedCommands: true,
         },
+        allowedTools: ['Read', 'Glob'],
       },
+    });
+  });
+
+
+  it('lets movement override when provider options source is global', () => {
+    const step = createMovement({
+      providerOptions: {
+        codex: { networkAccess: false },
+      },
+    });
+    const builder = createBuilder(step, {
+      providerOptionsSource: 'global',
+      providerOptions: {
+        codex: { networkAccess: true },
+      },
+    });
+
+    const options = builder.buildBaseOptions(step);
+
+    expect(options.providerOptions).toEqual({
+      codex: { networkAccess: false },
     });
   });
 
@@ -208,5 +250,45 @@ describe('OptionsBuilder.buildResumeOptions', () => {
     expect(options.allowedTools).toEqual([]);
     expect(options.maxTurns).toBe(3);
     expect(options.sessionId).toBe('session-123');
+  });
+});
+
+describe('OptionsBuilder.buildAgentOptions', () => {
+  it('uses merged providerOptions.claude.allowedTools when movement.allowedTools is absent', () => {
+    // Given
+    const step = createMovement({
+      providerOptions: {
+        claude: { allowedTools: ['Read', 'Edit', 'Bash'] },
+      },
+    });
+    const builder = createBuilder(step, {
+      providerOptions: {
+        claude: { allowedTools: ['Read', 'Glob'] },
+      },
+    });
+
+    // When
+    const options = builder.buildAgentOptions(step);
+
+    // Then
+    expect(options.allowedTools).toEqual(['Read', 'Edit', 'Bash']);
+  });
+
+  it('removes Write when output contracts exist and edit is not enabled', () => {
+    // Given
+    const step = createMovement({
+      outputContracts: [{ name: 'report.md', format: 'markdown', useJudge: true }],
+      providerOptions: {
+        claude: { allowedTools: ['Read', 'Write', 'Bash'] },
+      },
+      edit: false,
+    });
+    const builder = createBuilder(step);
+
+    // When
+    const options = builder.buildAgentOptions(step);
+
+    // Then
+    expect(options.allowedTools).toEqual(['Read', 'Bash']);
   });
 });

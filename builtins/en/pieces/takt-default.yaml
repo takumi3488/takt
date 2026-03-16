@@ -1,5 +1,5 @@
 name: takt-default
-description: TAKT development piece (plan → write tests → implement → AI antipattern review → 5-parallel review → fix → supervise → complete)
+description: TAKT development piece (plan → write tests → team-leader implement → AI antipattern review → 5-parallel review → fix → supervise → complete)
 piece_config:
   provider_options:
     codex:
@@ -12,39 +12,41 @@ loop_monitors:
   - cycle:
       - ai_review
       - ai_fix
-    threshold: 3
+    threshold: 5
     judge:
       persona: supervisor
-      instruction_template: |
-        The ai_review ↔ ai_fix loop has repeated {cycle_count} times.
-
-        Review the reports from each cycle and determine whether this loop
-        is healthy (making progress) or unproductive (repeating the same issues).
-
-        **Reports to reference:**
-        - AI Review results: {report:ai-review.md}
-
-        **Judgment criteria:**
-        - Are new issues being found/fixed in each cycle?
-        - Are the same findings being repeated?
-        - Are fixes actually being applied?
+      instruction: loop-monitor-ai-fix
       rules:
         - condition: Healthy (making progress)
           next: ai_review
         - condition: Unproductive (no improvement)
           next: reviewers
+  - cycle:
+      - reviewers
+      - fix
+    threshold: 5
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: Healthy (findings decreasing, fixes applied)
+          next: reviewers
+        - condition: Unproductive (same findings repeating)
+          next: supervise
 movements:
   - name: plan
     edit: false
     persona: planner
     knowledge: architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Bash
+          - WebSearch
+          - WebFetch
     rules:
       - condition: Requirements are clear and implementable
         next: write_tests
@@ -70,15 +72,19 @@ movements:
     knowledge:
       - takt
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+      - unit-testing
+      - e2e-testing
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
     instruction: write-tests-first
     rules:
@@ -87,7 +93,7 @@ movements:
       - condition: Cannot proceed because the test target is not implemented yet, so skip test writing
         next: implement
       - condition: Cannot proceed with test writing
-        next: ABORT
+        next: plan
       - condition: User input needed for clarification
         next: write_tests
         requires_user_input: true
@@ -108,28 +114,45 @@ movements:
     knowledge:
       - takt
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+      - task-decomposition
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
+    team_leader:
+      max_parts: 2
+      part_persona: coder
+      part_edit: true
+      part_permission_mode: edit
+      part_allowed_tools:
+        - Read
+        - Glob
+        - Grep
+        - Edit
+        - Write
+        - Bash
+        - WebSearch
+        - WebFetch
+    instruction: team-leader-implement
     rules:
       - condition: Implementation complete
         next: ai_review
       - condition: No implementation (report only)
         next: ai_review
       - condition: Cannot proceed, insufficient info
-        next: ai_review
+        next: plan
       - condition: User input required
         next: implement
         requires_user_input: true
         interactive_only: true
-    instruction: implement-after-tests
     output_contracts:
       report:
         - name: coder-scope.md
@@ -142,12 +165,14 @@ movements:
     policy:
       - review
       - ai-antipattern
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - WebSearch
+          - WebFetch
     rules:
       - condition: No AI-specific issues
         next: reviewers
@@ -168,15 +193,17 @@ movements:
     knowledge:
       - takt
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
     pass_previous_response: false
     rules:
@@ -191,10 +218,12 @@ movements:
     edit: false
     persona: architecture-reviewer
     policy: review
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
     rules:
       - condition: ai_review's findings are valid (fix required)
         next: ai_fix
@@ -210,13 +239,15 @@ movements:
         knowledge:
           - architecture
           - takt
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -230,13 +261,15 @@ movements:
         persona: security-reviewer
         policy: review
         knowledge: security
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -251,13 +284,15 @@ movements:
         policy:
           - review
           - qa
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -272,13 +307,18 @@ movements:
         policy:
           - review
           - testing
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Bash
-          - WebSearch
-          - WebFetch
+        knowledge:
+          - unit-testing
+          - e2e-testing
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -291,13 +331,15 @@ movements:
         edit: false
         persona: requirements-reviewer
         policy: review
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -320,15 +362,17 @@ movements:
     knowledge:
       - takt
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
     pass_previous_response: false
     rules:
@@ -341,13 +385,16 @@ movements:
     edit: false
     persona: supervisor
     policy: review
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Bash
-      - WebSearch
-      - WebFetch
+    knowledge: architecture
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Bash
+          - WebSearch
+          - WebFetch
     pass_previous_response: false
     rules:
       - condition: All checks passed

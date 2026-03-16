@@ -10,7 +10,7 @@ import { join, resolve, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import type { PieceConfig, PieceMovement, InteractiveMode } from '../../../core/models/index.js';
 import { getGlobalPiecesDir, getBuiltinPiecesDir, getProjectConfigDir, getRepertoireDir } from '../paths.js';
-import { isScopeRef, parseScopeRef } from '../../../faceted-prompting/index.js';
+import { isScopeRef, parseScopeRef } from 'faceted-prompting';
 import { resolvePieceConfigValues } from '../resolvePieceConfigValue.js';
 import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
 import { loadPieceFromFile } from './pieceParser.js';
@@ -229,8 +229,8 @@ function buildMovementPreviews(piece: PieceConfig, maxCount: number): MovementPr
       name: movement.name,
       personaDisplayName: movement.personaDisplayName,
       personaContent: readMovementPersona(movement),
-      instructionContent: movement.instructionTemplate,
-      allowedTools: movement.allowedTools ?? [],
+      instructionContent: movement.instruction,
+      allowedTools: movement.providerOptions?.claude?.allowedTools ?? [],
       canEdit: movement.edit === true,
     });
 
@@ -321,7 +321,7 @@ function buildFirstMovementInfo(piece: PieceConfig): FirstMovementInfo | undefin
   return {
     personaContent: readMovementPersona(movement),
     personaDisplayName: movement.personaDisplayName,
-    allowedTools: movement.allowedTools ?? [],
+    allowedTools: movement.providerOptions?.claude?.allowedTools ?? [],
   };
 }
 

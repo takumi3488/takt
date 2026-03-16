@@ -25,9 +25,6 @@ export class ClaudeClient {
     result: { success: boolean; interrupted?: boolean; content: string; fullContent?: string },
   ): Status {
     if (!result.success) {
-      if (result.interrupted) {
-        return 'interrupted';
-      }
       return 'error';
     }
     return 'done';
@@ -79,6 +76,7 @@ export class ClaudeClient {
       sessionId: result.sessionId,
       error: result.error,
       structuredOutput: result.structuredOutput,
+      providerUsage: result.providerUsage,
     };
   }
 
@@ -108,6 +106,7 @@ export class ClaudeClient {
       sessionId: result.sessionId,
       error: result.error,
       structuredOutput: result.structuredOutput,
+      providerUsage: result.providerUsage,
     };
   }
 
@@ -158,6 +157,7 @@ export class ClaudeClient {
       sessionId: result.sessionId,
       error: result.error,
       structuredOutput: result.structuredOutput,
+      providerUsage: result.providerUsage,
     };
   }
 

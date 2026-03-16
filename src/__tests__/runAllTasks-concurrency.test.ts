@@ -40,6 +40,13 @@ vi.mock('../infra/config/index.js', () => ({
     }
     return result;
   },
+  resolvePieceConfigValue: (_projectDir: string, key: string) => {
+    const raw = mockLoadConfigRaw() as Record<string, unknown>;
+    const config = ('global' in raw && 'project' in raw)
+      ? { ...raw.global as Record<string, unknown>, ...raw.project as Record<string, unknown> }
+      : { ...raw, provider: 'claude', verbose: false };
+    return config[key];
+  },
   resolveConfigValueWithSource: (_projectDir: string, key: string) => {
     const raw = mockLoadConfigRaw() as Record<string, unknown>;
     const config = ('global' in raw && 'project' in raw)
@@ -188,7 +195,10 @@ function createTask(name: string): TaskInfo {
     filePath: `/tasks/${name}.yaml`,
     createdAt: '2026-02-09T00:00:00.000Z',
     status: 'pending',
-    data: null,
+    data: {
+      task: `Task: ${name}`,
+      piece: 'default',
+    },
   };
 }
 
@@ -823,13 +833,95 @@ describe('runAllTasks concurrency', () => {
 
       // When / Then
       await expect(runAllTasks('/project')).rejects.toThrow('worker pool crashed');
+      // Exception path sends empty executedTaskNames, so no task details in summary
       expect(mockSendSlackNotification).toHaveBeenCalledOnce();
       const [url, message] = mockSendSlackNotification.mock.calls[0]! as [string, string];
       expect(url).toBe(webhookUrl);
       expect(message).toContain('TAKT Run');
+      expect(message).toContain('total=0');
+    });
+
+    it('should exclude previously completed tasks from Slack notification', async () => {
+      // Given: webhook is set, only task-2 is pending (task-1 was completed in a prior run)
+      mockGetSlackWebhookUrl.mockReturnValue(webhookUrl);
+      const task2 = createTask('task-2');
+      mockClaimNextTasks
+        .mockReturnValueOnce([task2])
+        .mockReturnValueOnce([]);
+      // listAllTaskItems returns both the old completed task and the newly completed task
+      mockListAllTaskItems.mockReturnValue([
+        {
+          kind: 'completed',
+          name: 'task-1',
+          createdAt: '2026-02-18T00:00:00.000Z',
+          filePath: '/tasks/task-1.yaml',
+          content: 'Task: task-1',
+          startedAt: '2026-02-18T00:00:00.000Z',
+          completedAt: '2026-02-18T00:00:30.000Z',
+          data: { task: 'task-1', piece: 'default' },
+        },
+        {
+          kind: 'completed',
+          name: 'task-2',
+          createdAt: '2026-02-19T00:00:00.000Z',
+          filePath: '/tasks/task-2.yaml',
+          content: 'Task: task-2',
+          startedAt: '2026-02-19T00:00:00.000Z',
+          completedAt: '2026-02-19T00:00:20.000Z',
+          data: { task: 'task-2', piece: 'default' },
+        },
+      ]);
+
+      // When
+      await runAllTasks('/project');
+
+      // Then: only task-2 should be in the notification (task-1 was not executed this run)
+      expect(mockSendSlackNotification).toHaveBeenCalledOnce();
+      const [, message] = mockSendSlackNotification.mock.calls[0]! as [string, string];
+      expect(message).toContain('total=1');
+      expect(message).toContain('success=1');
+      expect(message).toContain('task-2');
+      expect(message).not.toContain('task-1');
+    });
+
+    it('should exclude pending/running tasks from Slack notification', async () => {
+      // Given: task-1 completes, task-2 is still running (stuck)
+      mockGetSlackWebhookUrl.mockReturnValue(webhookUrl);
+      const task1 = createTask('task-1');
+      mockClaimNextTasks
+        .mockReturnValueOnce([task1])
+        .mockReturnValueOnce([]);
+      // listAllTaskItems returns a running task alongside the completed one
+      mockListAllTaskItems.mockReturnValue([
+        {
+          kind: 'completed',
+          name: 'task-1',
+          createdAt: '2026-02-19T00:00:00.000Z',
+          filePath: '/tasks/task-1.yaml',
+          content: 'Task: task-1',
+          startedAt: '2026-02-19T00:00:00.000Z',
+          completedAt: '2026-02-19T00:00:30.000Z',
+          data: { task: 'task-1', piece: 'default' },
+        },
+        {
+          kind: 'pending',
+          name: 'task-pending',
+          createdAt: '2026-02-19T00:00:00.000Z',
+          filePath: '/tasks/task-pending.yaml',
+          content: 'Task: task-pending',
+          data: { task: 'task-pending', piece: 'default' },
+        },
+      ]);
+
+      // When
+      await runAllTasks('/project');
+
+      // Then: only task-1 (completed) should appear, not the pending task
+      expect(mockSendSlackNotification).toHaveBeenCalledOnce();
+      const [, message] = mockSendSlackNotification.mock.calls[0]! as [string, string];
+      expect(message).toContain('total=1');
       expect(message).toContain('task-1');
-      expect(message).toContain('piece=default');
-      expect(message).toContain('duration=15s');
+      expect(message).not.toContain('task-pending');
     });
 
     it('should not send Slack notification when webhook URL is not set', async () => {

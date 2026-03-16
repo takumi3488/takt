@@ -75,13 +75,38 @@ function applyEnvOverrides(target: Record<string, unknown>, specs: readonly EnvS
   }
 }
 
+function applyLegacyGlobalLoggingEnvOverrides(target: Record<string, unknown>): void {
+  const nextLogging = process.env.TAKT_LOGGING;
+  const nextLoggingLevel = process.env.TAKT_LOGGING_LEVEL;
+  const legacyLogLevel = process.env.TAKT_LOG_LEVEL;
+  if (legacyLogLevel !== undefined && nextLoggingLevel === undefined && nextLogging === undefined) {
+    console.warn('Deprecated: "TAKT_LOG_LEVEL" is deprecated. Use "TAKT_LOGGING_LEVEL" instead.');
+    setNested(target, 'logging.level', parseEnvValue('TAKT_LOG_LEVEL', legacyLogLevel, 'string'));
+  }
+
+  const nextLoggingProviderEvents = process.env.TAKT_LOGGING_PROVIDER_EVENTS;
+  const legacyProviderEvents = process.env.TAKT_OBSERVABILITY_PROVIDER_EVENTS;
+  if (legacyProviderEvents !== undefined && nextLoggingProviderEvents === undefined && nextLogging === undefined) {
+    console.warn(
+      'Deprecated: "TAKT_OBSERVABILITY_PROVIDER_EVENTS" is deprecated. Use "TAKT_LOGGING_PROVIDER_EVENTS" instead.',
+    );
+    setNested(
+      target,
+      'logging.provider_events',
+      parseEnvValue('TAKT_OBSERVABILITY_PROVIDER_EVENTS', legacyProviderEvents, 'boolean'),
+    );
+  }
+}
+
 const GLOBAL_ENV_SPECS: readonly EnvSpec[] = [
   { path: 'language', type: 'string' },
-  { path: 'log_level', type: 'string' },
   { path: 'provider', type: 'string' },
   { path: 'model', type: 'string' },
-  { path: 'observability', type: 'json' },
-  { path: 'observability.provider_events', type: 'boolean' },
+  { path: 'logging', type: 'json' },
+  { path: 'logging.level', type: 'string' },
+  { path: 'logging.trace', type: 'boolean' },
+  { path: 'logging.debug', type: 'boolean' },
+  { path: 'logging.provider_events', type: 'boolean' },
   { path: 'analytics', type: 'json' },
   { path: 'analytics.enabled', type: 'boolean' },
   { path: 'analytics.events_path', type: 'string' },
@@ -93,6 +118,10 @@ const GLOBAL_ENV_SPECS: readonly EnvSpec[] = [
   { path: 'enable_builtin_pieces', type: 'boolean' },
   { path: 'anthropic_api_key', type: 'string' },
   { path: 'openai_api_key', type: 'string' },
+  { path: 'gemini_api_key', type: 'string' },
+  { path: 'google_api_key', type: 'string' },
+  { path: 'groq_api_key', type: 'string' },
+  { path: 'openrouter_api_key', type: 'string' },
   { path: 'codex_cli_path', type: 'string' },
   { path: 'claude_cli_path', type: 'string' },
   { path: 'cursor_cli_path', type: 'string' },
@@ -100,14 +129,8 @@ const GLOBAL_ENV_SPECS: readonly EnvSpec[] = [
   { path: 'copilot_github_token', type: 'string' },
   { path: 'opencode_api_key', type: 'string' },
   { path: 'cursor_api_key', type: 'string' },
-  { path: 'pipeline', type: 'json' },
-  { path: 'pipeline.default_branch_prefix', type: 'string' },
-  { path: 'pipeline.commit_message_template', type: 'string' },
-  { path: 'pipeline.pr_body_template', type: 'string' },
-  { path: 'minimal_output', type: 'boolean' },
   { path: 'bookmarks_file', type: 'string' },
   { path: 'piece_categories_file', type: 'string' },
-  { path: 'persona_providers', type: 'json' },
   { path: 'provider_options', type: 'json' },
   { path: 'provider_options.codex.network_access', type: 'boolean' },
   { path: 'provider_options.opencode.network_access', type: 'boolean' },
@@ -116,7 +139,6 @@ const GLOBAL_ENV_SPECS: readonly EnvSpec[] = [
   { path: 'provider_profiles', type: 'json' },
   { path: 'runtime', type: 'json' },
   { path: 'runtime.prepare', type: 'json' },
-  { path: 'branch_name_strategy', type: 'string' },
   { path: 'prevent_sleep', type: 'boolean' },
   { path: 'notification_sound', type: 'boolean' },
   { path: 'notification_sound_events', type: 'json' },
@@ -125,19 +147,23 @@ const GLOBAL_ENV_SPECS: readonly EnvSpec[] = [
   { path: 'notification_sound_events.piece_abort', type: 'boolean' },
   { path: 'notification_sound_events.run_complete', type: 'boolean' },
   { path: 'notification_sound_events.run_abort', type: 'boolean' },
-  { path: 'interactive_preview_movements', type: 'number' },
-  { path: 'verbose', type: 'boolean' },
-  { path: 'concurrency', type: 'number' },
-  { path: 'task_poll_interval_ms', type: 'number' },
   { path: 'auto_fetch', type: 'boolean' },
   { path: 'base_branch', type: 'string' },
 ];
 
 const PROJECT_ENV_SPECS: readonly EnvSpec[] = [
-  { path: 'piece', type: 'string' },
   { path: 'provider', type: 'string' },
-  { path: 'verbose', type: 'boolean' },
+  { path: 'model', type: 'string' },
   { path: 'concurrency', type: 'number' },
+  { path: 'pipeline', type: 'json' },
+  { path: 'pipeline.default_branch_prefix', type: 'string' },
+  { path: 'pipeline.commit_message_template', type: 'string' },
+  { path: 'pipeline.pr_body_template', type: 'string' },
+  { path: 'persona_providers', type: 'json' },
+  { path: 'branch_name_strategy', type: 'string' },
+  { path: 'minimal_output', type: 'boolean' },
+  { path: 'task_poll_interval_ms', type: 'number' },
+  { path: 'interactive_preview_movements', type: 'number' },
   { path: 'analytics', type: 'json' },
   { path: 'analytics.enabled', type: 'boolean' },
   { path: 'analytics.events_path', type: 'string' },
@@ -149,14 +175,11 @@ const PROJECT_ENV_SPECS: readonly EnvSpec[] = [
   { path: 'provider_options.claude.sandbox.excluded_commands', type: 'json' },
   { path: 'provider_profiles', type: 'json' },
   { path: 'base_branch', type: 'string' },
-  { path: 'claude_cli_path', type: 'string' },
-  { path: 'codex_cli_path', type: 'string' },
-  { path: 'cursor_cli_path', type: 'string' },
-  { path: 'copilot_cli_path', type: 'string' },
 ];
 
 export function applyGlobalConfigEnvOverrides(target: Record<string, unknown>): void {
   applyEnvOverrides(target, GLOBAL_ENV_SPECS);
+  applyLegacyGlobalLoggingEnvOverrides(target);
 }
 
 export function applyProjectConfigEnvOverrides(target: Record<string, unknown>): void {

@@ -23,13 +23,20 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
+function preserveToolConfigDir(envKey: string, xdgSubdir: string): string {
+  return process.env[envKey]
+    ?? join(process.env['XDG_CONFIG_HOME'] ?? join(process.env['HOME']!, '.config'), xdgSubdir);
+}
+
 function createBaseEnvironment(runtimeRoot: string): Record<string, string> {
+  const ghConfigDir = preserveToolConfigDir('GH_CONFIG_DIR', 'gh');
   return {
     TMPDIR: join(runtimeRoot, 'tmp'),
     XDG_CACHE_HOME: join(runtimeRoot, 'cache'),
     XDG_CONFIG_HOME: join(runtimeRoot, 'config'),
     XDG_STATE_HOME: join(runtimeRoot, 'state'),
     CI: 'true',
+    GH_CONFIG_DIR: ghConfigDir,
   };
 }
 

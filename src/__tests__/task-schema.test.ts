@@ -1,9 +1,3 @@
-/**
- * Unit tests for task schema validation
- *
- * Tests TaskRecordSchema cross-field validation rules (status-dependent constraints).
- */
-
 import { describe, it, expect } from 'vitest';
 import {
   TaskRecordSchema,
@@ -56,6 +50,18 @@ function makeFailedRecord() {
   };
 }
 
+function makePrFailedRecord() {
+  return {
+    name: 'test-task',
+    status: 'pr_failed' as const,
+    content: 'task content',
+    created_at: '2025-01-01T00:00:00.000Z',
+    started_at: '2025-01-01T01:00:00.000Z',
+    completed_at: '2025-01-01T02:00:00.000Z',
+    failure: { error: 'PR creation failed: Base ref must be a branch' },
+  };
+}
+
 describe('TaskExecutionConfigSchema', () => {
   it('should accept valid config with all optional fields', () => {
     const config = {
@@ -84,6 +90,10 @@ describe('TaskExecutionConfigSchema', () => {
 
   it('should reject non-integer issue number', () => {
     expect(() => TaskExecutionConfigSchema.parse({ issue: 1.5 })).toThrow();
+  });
+
+  it('should accept base_branch when provided in config', () => {
+    expect(() => TaskExecutionConfigSchema.parse({ base_branch: 'feature/base' })).not.toThrow();
   });
 });
 
@@ -180,6 +190,32 @@ describe('TaskRecordSchema', () => {
     });
   });
 
+  describe('pr_failed status', () => {
+    it('should accept valid pr_failed record with failure', () => {
+      expect(() => TaskRecordSchema.parse(makePrFailedRecord())).not.toThrow();
+    });
+
+    it('should accept pr_failed record without failure (optional)', () => {
+      const record = { ...makePrFailedRecord(), failure: undefined };
+      expect(() => TaskRecordSchema.parse(record)).not.toThrow();
+    });
+
+    it('should reject pr_failed record without started_at', () => {
+      const record = { ...makePrFailedRecord(), started_at: null };
+      expect(() => TaskRecordSchema.parse(record)).toThrow();
+    });
+
+    it('should reject pr_failed record without completed_at', () => {
+      const record = { ...makePrFailedRecord(), completed_at: null };
+      expect(() => TaskRecordSchema.parse(record)).toThrow();
+    });
+
+    it('should reject pr_failed record with owner_pid', () => {
+      const record = { ...makePrFailedRecord(), owner_pid: 1234 };
+      expect(() => TaskRecordSchema.parse(record)).toThrow();
+    });
+  });
+
   describe('failed status', () => {
     it('should accept valid failed record', () => {
       expect(() => TaskRecordSchema.parse(makeFailedRecord())).not.toThrow();
@@ -250,5 +286,14 @@ describe('TaskRecordSchema', () => {
       const record = { ...makePendingRecord(), content: undefined, content_file: '' };
       expect(() => TaskRecordSchema.parse(record)).toThrow();
     });
+  });
+
+  it('should accept base_branch when task record uses config-only fields', () => {
+    expect(() => TaskRecordSchema.parse({
+      ...makePendingRecord(),
+      content: undefined,
+      task_dir: '.takt/tasks/feat-bugfix',
+      base_branch: 'release/main',
+    })).not.toThrow();
   });
 });

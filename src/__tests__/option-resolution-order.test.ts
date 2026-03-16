@@ -6,6 +6,7 @@ const {
   loadAgentPromptMock,
   loadProjectConfigMock,
   loadGlobalConfigMock,
+  resolveConfigValueMock,
   loadTemplateMock,
   providerSetupMock,
   providerCallMock,
@@ -19,6 +20,7 @@ const {
     loadAgentPromptMock: vi.fn(),
     loadProjectConfigMock: vi.fn(),
     loadGlobalConfigMock: vi.fn(),
+    resolveConfigValueMock: vi.fn(),
     loadTemplateMock: vi.fn(),
     providerSetupMock: providerSetup,
     providerCallMock: providerCall,
@@ -32,6 +34,7 @@ vi.mock('../infra/providers/index.js', () => ({
 vi.mock('../infra/config/index.js', () => ({
   loadProjectConfig: loadProjectConfigMock,
   loadGlobalConfig: loadGlobalConfigMock,
+  resolveConfigValue: resolveConfigValueMock,
   loadCustomAgents: loadCustomAgentsMock,
   loadAgentPrompt: loadAgentPromptMock,
 }));
@@ -52,6 +55,12 @@ describe('option resolution order', () => {
       language: 'en',
       concurrency: 1,
       taskPollIntervalMs: 500,
+    });
+    resolveConfigValueMock.mockImplementation((_cwd: string, key: string) => {
+      if (key === 'personaProviders') {
+        return loadProjectConfigMock.mock.results.at(-1)?.value?.personaProviders;
+      }
+      return undefined;
     });
     loadCustomAgentsMock.mockReturnValue(new Map());
     loadAgentPromptMock.mockReturnValue('prompt');
@@ -98,12 +107,14 @@ describe('option resolution order', () => {
   });
 
   it('should apply persona provider override before local/global config', async () => {
-    loadProjectConfigMock.mockReturnValue({ provider: 'opencode' });
-    loadGlobalConfigMock.mockReturnValue({
-      provider: 'mock',
+    loadProjectConfigMock.mockReturnValue({
+      provider: 'opencode',
       personaProviders: {
         coder: { provider: 'claude' },
       },
+    });
+    loadGlobalConfigMock.mockReturnValue({
+      provider: 'mock',
       language: 'en',
       concurrency: 1,
       taskPollIntervalMs: 500,
@@ -117,16 +128,16 @@ describe('option resolution order', () => {
   });
 
   it('should resolve model in order: CLI > persona > step > local > global', async () => {
-    loadProjectConfigMock.mockReturnValue({
-      provider: 'claude',
-      model: 'local-model',
-    });
     loadGlobalConfigMock.mockReturnValue({
       provider: 'claude',
       model: 'global-model',
       language: 'en',
       concurrency: 1,
       taskPollIntervalMs: 500,
+    });
+    loadProjectConfigMock.mockReturnValue({
+      provider: 'claude',
+      model: 'local-model',
       personaProviders: {
         coder: { model: 'persona-model' },
       },
@@ -249,6 +260,83 @@ describe('option resolution order', () => {
     expect(providerCallMock).toHaveBeenLastCalledWith(
       'task',
       expect.objectContaining({ model: 'project-model' }),
+    );
+  });
+
+  it('should use custom agent allowedTools when run options do not provide allowedTools', async () => {
+    loadProjectConfigMock.mockReturnValue({ provider: 'claude' });
+    loadCustomAgentsMock.mockReturnValue(new Map([
+      ['custom', { name: 'custom', prompt: 'agent prompt', allowedTools: ['Read', 'Grep'] }],
+    ]));
+
+    await runAgent('custom', 'task', { cwd: '/repo' });
+
+    expect(providerCallMock).toHaveBeenLastCalledWith(
+      'task',
+      expect.objectContaining({ allowedTools: ['Read', 'Grep'] }),
+    );
+  });
+
+  it('should prioritize run options allowedTools over custom agent allowedTools', async () => {
+    loadProjectConfigMock.mockReturnValue({ provider: 'claude' });
+    loadCustomAgentsMock.mockReturnValue(new Map([
+      ['custom', { name: 'custom', prompt: 'agent prompt', allowedTools: ['Read', 'Grep'] }],
+    ]));
+
+    await runAgent('custom', 'task', { cwd: '/repo', allowedTools: ['Write'] });
+
+    expect(providerCallMock).toHaveBeenLastCalledWith(
+      'task',
+      expect.objectContaining({ allowedTools: ['Write'] }),
+    );
+  });
+
+  it('should resolve permission mode after provider resolution using provider profiles', async () => {
+    loadProjectConfigMock.mockReturnValue({});
+    loadGlobalConfigMock.mockReturnValue({
+      provider: 'codex',
+      providerProfiles: {
+        codex: { defaultPermissionMode: 'full' },
+      },
+      language: 'en',
+      concurrency: 1,
+      taskPollIntervalMs: 500,
+    });
+
+    await runAgent(undefined, 'task', {
+      cwd: '/repo',
+      permissionResolution: {
+        movementName: 'supervise',
+      },
+    });
+
+    expect(getProviderMock).toHaveBeenLastCalledWith('codex');
+    expect(providerCallMock).toHaveBeenLastCalledWith(
+      'task',
+      expect.objectContaining({ permissionMode: 'full' }),
+    );
+  });
+
+  it('should preserve explicit permission mode when permissionResolution is not set', async () => {
+    loadProjectConfigMock.mockReturnValue({});
+    loadGlobalConfigMock.mockReturnValue({
+      provider: 'codex',
+      providerProfiles: {
+        codex: { defaultPermissionMode: 'full' },
+      },
+      language: 'en',
+      concurrency: 1,
+      taskPollIntervalMs: 500,
+    });
+
+    await runAgent(undefined, 'task', {
+      cwd: '/repo',
+      permissionMode: 'readonly',
+    });
+
+    expect(providerCallMock).toHaveBeenLastCalledWith(
+      'task',
+      expect.objectContaining({ permissionMode: 'readonly' }),
     );
   });
 });

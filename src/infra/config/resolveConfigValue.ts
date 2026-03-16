@@ -1,6 +1,7 @@
-import { loadGlobalConfig } from './global/globalConfig.js';
+import * as globalConfigModule from './global/globalConfig.js';
 import { loadProjectConfig } from './project/projectConfig.js';
 import { envVarNameFromPath } from './env/config-env-overrides.js';
+import { expandOptionalHomePath } from './pathExpansion.js';
 import {
   getCachedProjectConfig,
   getCachedResolvedValue,
@@ -37,6 +38,14 @@ interface ResolutionRule<K extends ConfigParameterKey> {
   pieceValue?: (pieceContext: PieceContext | undefined) => LoadedConfig[K] | undefined;
 }
 
+/** Default values for project-local keys that need NonNullable guarantees */
+const PROJECT_LOCAL_DEFAULTS: Partial<Record<ConfigParameterKey, unknown>> = {
+  minimalOutput: false,
+  concurrency: 1,
+  taskPollIntervalMs: 500,
+  interactivePreviewMovements: 3,
+};
+
 function loadProjectConfigCached(projectDir: string) {
   const cached = getCachedProjectConfig(projectDir);
   if (cached !== undefined) {
@@ -60,7 +69,6 @@ const PROVIDER_OPTIONS_ENV_PATHS = [
 ] as const;
 
 const RESOLUTION_REGISTRY: Partial<{ [K in ConfigParameterKey]: ResolutionRule<K> }> = {
-  piece: { layers: ['local', 'global'] },
   provider: {
     layers: ['local', 'piece', 'global'],
     pieceValue: (pieceContext) => pieceContext?.provider,
@@ -73,10 +81,11 @@ const RESOLUTION_REGISTRY: Partial<{ [K in ConfigParameterKey]: ResolutionRule<K
     layers: ['local', 'piece', 'global'],
     pieceValue: (pieceContext) => pieceContext?.providerOptions,
   },
+  allowGitHooks: { layers: ['local', 'global'] },
+  allowGitFilters: { layers: ['local', 'global'] },
   autoPr: { layers: ['local', 'global'] },
   draftPr: { layers: ['local', 'global'] },
   analytics: { layers: ['local', 'global'], mergeMode: 'analytics' },
-  verbose: { layers: ['local', 'global'] },
   autoFetch: { layers: ['global'] },
   baseBranch: { layers: ['local', 'global'] },
   pieceOverrides: { layers: ['local', 'global'] },
@@ -84,13 +93,13 @@ const RESOLUTION_REGISTRY: Partial<{ [K in ConfigParameterKey]: ResolutionRule<K
 
 function resolveAnalyticsMerged(
   project: ReturnType<typeof loadProjectConfigCached>,
-  global: ReturnType<typeof loadGlobalConfig>,
+  global: ReturnType<typeof globalConfigModule.loadGlobalConfig>,
 ): LoadedConfig['analytics'] {
   const localAnalytics = project.analytics;
   const globalAnalytics = global.analytics;
 
   const enabled = localAnalytics?.enabled ?? globalAnalytics?.enabled;
-  const eventsPath = localAnalytics?.eventsPath ?? globalAnalytics?.eventsPath;
+  const eventsPath = expandOptionalHomePath(localAnalytics?.eventsPath ?? globalAnalytics?.eventsPath);
   const retentionDays = localAnalytics?.retentionDays ?? globalAnalytics?.retentionDays;
 
   if (enabled === undefined && eventsPath === undefined && retentionDays === undefined) {
@@ -101,7 +110,7 @@ function resolveAnalyticsMerged(
 
 function resolveAnalyticsSource(
   project: ReturnType<typeof loadProjectConfigCached>,
-  global: ReturnType<typeof loadGlobalConfig>,
+  global: ReturnType<typeof globalConfigModule.loadGlobalConfig>,
 ): ConfigValueSource {
   if (project.analytics !== undefined) return 'project';
   if (global.analytics !== undefined) return 'global';
@@ -116,7 +125,7 @@ function getLocalLayerValue<K extends ConfigParameterKey>(
 }
 
 function getGlobalLayerValue<K extends ConfigParameterKey>(
-  global: ReturnType<typeof loadGlobalConfig>,
+  global: ReturnType<typeof globalConfigModule.loadGlobalConfig>,
   key: K,
 ): LoadedConfig[K] | undefined {
   return global[key as keyof typeof global] as LoadedConfig[K] | undefined;
@@ -125,7 +134,7 @@ function getGlobalLayerValue<K extends ConfigParameterKey>(
 function resolveByRegistry<K extends ConfigParameterKey>(
   key: K,
   project: ReturnType<typeof loadProjectConfigCached>,
-  global: ReturnType<typeof loadGlobalConfig>,
+  global: ReturnType<typeof globalConfigModule.loadGlobalConfig>,
   options: ResolveConfigOptions | undefined,
 ): ResolvedConfigValue<K> {
   const rule = (RESOLUTION_REGISTRY[key] ?? DEFAULT_RULE) as ResolutionRule<K>;
@@ -159,6 +168,11 @@ function resolveByRegistry<K extends ConfigParameterKey>(
     }
   }
 
+  const fallbackDefaultValue = PROJECT_LOCAL_DEFAULTS[key];
+  if (fallbackDefaultValue !== undefined) {
+    return { value: fallbackDefaultValue as LoadedConfig[K], source: 'default' };
+  }
+
   return { value: undefined as LoadedConfig[K], source: 'default' };
 }
 
@@ -172,7 +186,7 @@ function resolveUncachedConfigValue<K extends ConfigParameterKey>(
   options?: ResolveConfigOptions,
 ): ResolvedConfigValue<K> {
   const project = loadProjectConfigCached(projectDir);
-  const global = loadGlobalConfig();
+  const global = globalConfigModule.loadGlobalConfig();
   return resolveByRegistry(key, project, global, options);
 }
 
@@ -209,4 +223,12 @@ export function resolveConfigValues<K extends ConfigParameterKey>(
     result[key] = resolveConfigValue(projectDir, key, options);
   }
   return result;
+}
+
+export function isDebugLoggingEnabled(
+  projectDir: string,
+  options?: ResolveConfigOptions,
+): boolean {
+  const logging = resolveConfigValue(projectDir, 'logging', options);
+  return logging?.debug === true || logging?.trace === true || logging?.level === 'debug';
 }

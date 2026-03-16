@@ -127,21 +127,22 @@ export async function runConversationLoop(
 
   if (initialInput) {
     history.push({ role: 'user', content: initialInput });
-    log.debug('Processing initial input', { initialInput, sessionId });
+    log.debug('Loaded initial input into local history without auto-submitting to AI', {
+      initialInput,
+      sessionId,
+    });
+  }
 
-    const promptWithTransform = strategy.transformPrompt(initialInput);
-    const result = await doCallAI(promptWithTransform, strategy.systemPrompt, strategy.allowedTools);
-    if (result) {
-      if (!result.success) {
-        error(result.content);
-        blankLine();
-        return { action: 'cancel', task: '' };
-      }
-      history.push({ role: 'assistant', content: result.content });
-      blankLine();
-    } else {
-      history.pop();
+  async function handleSummaryAction(task: string): Promise<InteractiveModeResult | null> {
+    const selectedAction = strategy.selectAction
+      ? await strategy.selectAction(task, ctx.lang)
+      : await selectPostSummaryAction(task, ui.proposed, ui);
+    if (selectedAction === 'continue' || selectedAction === null) {
+      info(ui.continuePrompt);
+      return null;
     }
+    log.info('Conversation action selected', { action: selectedAction, messageCount: history.length });
+    return { action: selectedAction, task };
   }
 
   while (true) {
@@ -203,8 +204,12 @@ export async function runConversationLoop(
           info(ui.retryNoOrder);
           continue;
         }
-        log.info('Retry command — resubmitting previous order.md');
-        return { action: 'execute', task: strategy.previousOrderContent };
+        log.info('Retry command — using previous order.md');
+        const selectedAction = await handleSummaryAction(strategy.previousOrderContent);
+        if (selectedAction === null) {
+          continue;
+        }
+        return selectedAction;
       }
 
       case SlashCommand.Go: {
@@ -234,15 +239,11 @@ export async function runConversationLoop(
           return { action: 'cancel', task: '' };
         }
         const task = summaryResult.content.trim();
-        const selectedAction = strategy.selectAction
-          ? await strategy.selectAction(task, ctx.lang)
-          : await selectPostSummaryAction(task, ui.proposed, ui);
-        if (selectedAction === 'continue' || selectedAction === null) {
-          info(ui.continuePrompt);
+        const selectedAction = await handleSummaryAction(task);
+        if (selectedAction === null) {
           continue;
         }
-        log.info('Conversation action selected', { action: selectedAction, messageCount: history.length });
-        return { action: selectedAction, task };
+        return selectedAction;
       }
 
       case SlashCommand.Replay: {

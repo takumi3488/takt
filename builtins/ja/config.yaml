@@ -2,24 +2,35 @@
 # 配置場所: ~/.takt/config.yaml
 
 # =====================================
-# 通常設定（ピース非依存）
+# 通常設定
 # =====================================
 language: ja         # 表示言語: ja | en
-log_level: info      # ログレベル: debug | info | warn | error
-provider: claude     # デフォルト実行プロバイダー: claude | codex | opencode | mock
-# model: sonnet      # 省略可。providerに渡すモデル名
+
+# デフォルトプロバイダー・モデル
+# provider: claude                    # デフォルトプロバイダー: claude | codex | opencode | cursor | copilot | mock
+# model: sonnet                       # デフォルトモデル（プロバイダーにそのまま渡される）
 
 # 実行制御
 # worktree_dir: ~/takt-worktrees   # 共有clone作成先ディレクトリ
-# auto_pr: false                   # worktree実行後に自動PR作成するか
-branch_name_strategy: ai       # ブランチ名生成: romaji | ai
-concurrency: 2               # takt run の同時実行数（1-10）
-# task_poll_interval_ms: 500       # takt run のタスク監視間隔ms（100-5000）
 # prevent_sleep: false             # macOS実行中のスリープ防止（caffeinate）
+# auto_fetch: false                # clone前にfetchして最新化するか
+# base_branch: main                # cloneのベースブランチ（デフォルト: カレントブランチ）
+# concurrency: 1                   # takt run の同時実行タスク数 (1-10)
+# task_poll_interval_ms: 500       # 新規タスク検出のポーリング間隔（ms, 100-5000）
+
+# PR / ブランチ
+# auto_pr: false                   # worktree実行後にPR自動作成
+# draft_pr: false                  # ドラフトPRとして作成
+# branch_name_strategy: romaji     # ブランチ名生成: romaji | ai
+
+# パイプライン実行
+# pipeline:
+#   default_branch_prefix: "takt/"         # パイプラインで作成するブランチのプレフィックス
+#   commit_message_template: "{title}"     # コミットメッセージテンプレート。変数: {title}, {issue}
+#   pr_body_template: "{report}"           # PR本文テンプレート。変数: {issue_body}, {report}, {issue}
 
 # 出力・通知
-# minimal_output: false            # 出力を最小化（CI向け）
-# verbose: false                   # 詳細ログを有効化
+# minimal_output: false            # エージェント詳細出力を抑制
 # notification_sound: true         # 通知音全体のON/OFF
 # notification_sound_events:       # イベント別通知音（未指定はtrue扱い）
 #   iteration_limit: true
@@ -27,74 +38,86 @@ concurrency: 2               # takt run の同時実行数（1-10）
 #   piece_abort: true
 #   run_complete: true
 #   run_abort: true
-# observability:
+# logging:
+#   level: info                    # ログレベル: debug | info | warn | error
+#   trace: true                    # trace.md 実行レポート生成
+#   debug: false                   # debug.log + prompts.jsonl を有効化
 #   provider_events: false         # providerイベントログを記録
+#   usage_events: false            # 使用量イベントログを記録
+
+# アナリティクス
 # analytics:
-#   enabled: true                  # 分析メトリクスの収集を有効化
-#   events_path: ~/.takt/analytics/events  # 分析イベント保存先
-#   retention_days: 30             # 分析イベント保持日数
+#   enabled: true                  # ローカルアナリティクス収集を有効化
+#   events_path: ~/.takt/analytics/events  # イベントディレクトリのカスタムパス
+#   retention_days: 30             # イベントファイルの保持期間（日）
+
+# インタラクティブモード
+# interactive_preview_movements: 3 # インタラクティブモードでのムーブメントプレビュー数 (0-10)
+
+# ペルソナ別プロバイダー・モデル指定
+# persona_providers:
+#   coder:
+#     provider: claude
+#     model: opus
+#   reviewer:
+#     provider: codex
+#     model: gpt-5.2-codex
+
+# プロバイダー固有オプション（最低優先度、ピース/ムーブメントで上書き可能）
+# provider_options:
+#   codex:
+#     network_access: true
+#   claude:
+#     sandbox:
+#       allow_unsandboxed_commands: true
+
+# プロバイダー権限プロファイル
+# provider_profiles:
+#   claude:
+#     default_permission_mode: edit
+#   codex:
+#     default_permission_mode: edit
+
+# ランタイム環境の準備
+# runtime:
+#   prepare: [node, gradle, ./custom-script.sh]
+
+# ピースレベルのオーバーライド
+# piece_overrides:
+#   quality_gates:
+#     - "All tests pass"
+#   quality_gates_edit_only: true
+#   movements:
+#     review:
+#       quality_gates:
+#         - "No security vulnerabilities"
+#   personas:
+#     coder:
+#       quality_gates:
+#         - "Code follows conventions"
 
 # 認証情報（環境変数優先）
 # anthropic_api_key: "sk-ant-..." # Claude APIキー
 # openai_api_key: "sk-..."         # Codex APIキー
+# gemini_api_key: "..."            # Gemini APIキー
+# google_api_key: "..."            # Google APIキー
+# groq_api_key: "..."              # Groq APIキー
+# openrouter_api_key: "..."        # OpenRouter APIキー
 # opencode_api_key: "..."          # OpenCode APIキー
-# codex_cli_path: "/absolute/path/to/codex"  # Codex CLI絶対パス
+# cursor_api_key: "..."            # Cursor APIキー
 
-# パイプライン
-# pipeline:
-#   default_branch_prefix: "takt/"             # pipeline作成ブランチの接頭辞
-#   commit_message_template: "feat: {title} (#{issue})"  # コミット文テンプレート
-#   pr_body_template: |                          # PR本文テンプレート
-#     ## Summary
-#     {issue_body}
-#     Closes #{issue}
+# CLIパス
+# codex_cli_path: "/absolute/path/to/codex"    # Codex CLI絶対パス
+# claude_cli_path: "/absolute/path/to/claude"  # Claude Code CLI絶対パス
+# cursor_cli_path: "/absolute/path/to/cursor"  # cursor-agent CLI絶対パス
+# copilot_cli_path: "/absolute/path/to/copilot" # Copilot CLI絶対パス
+# copilot_github_token: "ghp_..."              # Copilot GitHubトークン
 
 # その他
 # bookmarks_file: ~/.takt/preferences/bookmarks.yaml   # ブックマーク保存先
 
-# =====================================
-# ピースにも関わる設定（global defaults）
-# =====================================
-# 1) ペルソナ単位でプロバイダー・モデルを切り替える
-# persona_providers:
-#   coder:
-#     provider: codex    # coderペルソナはcodexで実行
-#     model: o3-mini     # 使用モデル（省略可）
-#   reviewer:
-#     provider: claude   # reviewerペルソナはclaudeで実行
-
-# 2) provider 固有オプション
-#    優先順位（provider/model/provider_options 等の piece 対応キー）:
-#    global < piece < project < env
-# provider_options:
-#   codex:
-#     network_access: true      # Codex実行時のネットワークアクセス許可
-#   opencode:
-#     network_access: true      # OpenCode実行時のネットワークアクセス許可
-#   claude:
-#     sandbox:
-#       allow_unsandboxed_commands: false   # trueで対象コマンドを非サンドボックス実行
-#       excluded_commands:
-#         - "npm publish"                  # 非サンドボックス対象コマンド
-
-# 3) movement の権限ポリシー
-# provider_profiles:
-#   codex:
-#     default_permission_mode: full         # 既定権限: readonly | edit | full
-#     movement_permission_overrides:
-#       ai_review: readonly                 # movement単位の上書き
-#   claude:
-#     default_permission_mode: edit
-
-# 4) 実行前のランタイム準備（推奨: 有効化）
-runtime:
-  prepare:
-    - gradle      # Gradleキャッシュ/環境を .runtime 配下に準備
-    - node        # npmキャッシュ/環境を .runtime 配下に準備
-
-# 5) ピース一覧/カテゴリ
+# ピース一覧/カテゴリ
 # enable_builtin_pieces: true                             # builtins/{lang}/pieces を有効化
 # disabled_builtins:
 #   - magi                                                # 無効化するビルトインピース名
 # piece_categories_file: ~/.takt/preferences/piece-categories.yaml  # カテゴリ定義ファイル
-# interactive_preview_movements: 3                        # 対話モードのプレビュー件数（0-10）

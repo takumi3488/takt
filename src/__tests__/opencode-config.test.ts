@@ -16,7 +16,7 @@ describe('Schemas accept opencode provider', () => {
     expect(result.provider).toBe('opencode');
   });
 
-  it('should accept opencode in GlobalConfigSchema persona_providers field', () => {
+  it('should accept persona_providers in GlobalConfigSchema', () => {
     const result = GlobalConfigSchema.parse({
       persona_providers: { coder: { provider: 'opencode' } },
     });

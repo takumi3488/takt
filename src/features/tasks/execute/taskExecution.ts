@@ -14,17 +14,23 @@ import {
 import { createLogger, getErrorMessage, getSlackWebhookUrl, notifyError, notifySuccess, sendSlackNotification, buildSlackRunSummary } from '../../../shared/utils/index.js';
 import { getLabel } from '../../../shared/i18n/index.js';
 import { executePiece } from './pieceExecution.js';
-import { DEFAULT_PIECE_NAME } from '../../../shared/constants.js';
 import type { TaskExecutionOptions, ExecuteTaskOptions, PieceExecutionResult } from './types.js';
 import { runWithWorkerPool } from './parallelExecution.js';
 import { resolveTaskExecution, resolveTaskIssue } from './resolveTask.js';
 import { postExecutionFlow } from './postExecution.js';
-import { buildTaskResult, persistExceededTaskResult, persistTaskError, persistTaskResult } from './taskResultHandler.js';
+import { buildTaskResult, persistExceededTaskResult, persistTaskError, persistPrFailedTaskResult, persistTaskResult } from './taskResultHandler.js';
 import { generateRunId, toSlackTaskDetail } from './slackSummaryAdapter.js';
 
 export type { TaskExecutionOptions, ExecuteTaskOptions };
 
 const log = createLogger('task');
+
+type TaskExecutionParallelOptions = {
+  abortSignal?: AbortSignal;
+  taskPrefix?: string;
+  taskColorIndex?: number;
+  taskDisplayLabel?: string;
+};
 
 async function executeTaskWithResult(options: ExecuteTaskOptions): Promise<PieceExecutionResult> {
   const {
@@ -54,7 +60,7 @@ async function executeTaskWithResult(options: ExecuteTaskOptions): Promise<Piece
     } else {
       error(`Piece "${pieceIdentifier}" not found.`);
       info('Available pieces are in ~/.takt/pieces/ or .takt/pieces/');
-      info('Use "takt switch" to select a piece.');
+      info('Specify a valid piece when creating tasks (e.g., via "takt add").');
       return { success: false, reason: `Piece "${pieceIdentifier}" not found.` };
     }
   }
@@ -109,9 +115,8 @@ export async function executeAndCompleteTask(
   task: TaskInfo,
   taskRunner: TaskRunner,
   cwd: string,
-  pieceName: string,
-  options?: TaskExecutionOptions,
-  parallelOptions?: { abortSignal?: AbortSignal; taskPrefix?: string; taskColorIndex?: number; taskDisplayLabel?: string },
+  taskExecutionOptions?: TaskExecutionOptions,
+  parallelOptions?: TaskExecutionParallelOptions,
 ): Promise<boolean> {
   const startedAt = new Date().toISOString();
   const taskAbortController = new AbortController();
@@ -147,7 +152,7 @@ export async function executeAndCompleteTask(
       issueNumber,
       maxMovementsOverride,
       initialIterationOverride,
-    } = await resolveTaskExecution(task, cwd, pieceName, taskAbortSignal);
+    } = await resolveTaskExecution(task, cwd, taskAbortSignal);
 
     // cwd is always the project root; pass it as projectCwd so reports/sessions go there
     const taskRunResult = await executeTaskWithResult({
@@ -155,7 +160,7 @@ export async function executeAndCompleteTask(
       cwd: execCwd,
       pieceIdentifier: execPiece,
       projectCwd: cwd,
-      agentOverrides: options,
+      agentOverrides: taskExecutionOptions,
       startMovement,
       retryNote,
       reportDirName,
@@ -176,7 +181,7 @@ export async function executeAndCompleteTask(
     const completedAt = new Date().toISOString();
 
     let prUrl: string | undefined;
-    let effectiveRunResult = taskRunResult;
+    let prFailedError: string | undefined;
     if (taskSuccess && isWorktree) {
       const issues = resolveTaskIssue(issueNumber);
       const postResult = await postExecutionFlow({
@@ -192,22 +197,28 @@ export async function executeAndCompleteTask(
       });
       prUrl = postResult.prUrl;
       if (postResult.prFailed) {
-        effectiveRunResult = { success: false, reason: `PR creation failed: ${postResult.prError}` };
+        prFailedError = postResult.prError;
       }
     }
 
     const taskResult = buildTaskResult({
       task,
-      runResult: effectiveRunResult,
+      runResult: taskRunResult,
       startedAt,
       completedAt,
       branch,
       worktreePath,
       prUrl,
     });
+
+    if (prFailedError !== undefined) {
+      persistPrFailedTaskResult(taskRunner, taskResult, prFailedError);
+      return true;
+    }
+
     persistTaskResult(taskRunner, taskResult);
 
-    return effectiveRunResult.success;
+    return taskRunResult.success;
   } catch (err) {
     const completedAt = new Date().toISOString();
     persistTaskError(taskRunner, task, startedAt, completedAt, err);
@@ -227,7 +238,6 @@ export async function executeAndCompleteTask(
  */
 export async function runAllTasks(
   cwd: string,
-  pieceName: string = DEFAULT_PIECE_NAME,
   options?: TaskExecutionOptions,
 ): Promise<void> {
   const taskRunner = new TaskRunner(cwd);
@@ -262,10 +272,13 @@ export async function runAllTasks(
     info(`Concurrency: ${concurrency}`);
   }
 
-  const sendSlackSummary = async (): Promise<void> => {
+  const sendSlackSummary = async (executedTaskNames: string[]): Promise<void> => {
     if (!slackWebhookUrl) return;
     const durationSec = Math.round((Date.now() - startTime) / 1000);
-    const tasks = taskRunner.listAllTaskItems().map(toSlackTaskDetail);
+    const executedSet = new Set(executedTaskNames);
+    const tasks = taskRunner.listAllTaskItems()
+      .filter((item) => executedSet.has(item.name))
+      .map(toSlackTaskDetail);
     const successCount = tasks.filter((t) => t.success).length;
     const message = buildSlackRunSummary({
       runId,
@@ -280,7 +293,14 @@ export async function runAllTasks(
   };
 
   try {
-    const result = await runWithWorkerPool(taskRunner, initialTasks, concurrency, cwd, pieceName, options, globalConfig.taskPollIntervalMs);
+    const result = await runWithWorkerPool(
+      taskRunner,
+      initialTasks,
+      concurrency,
+      cwd,
+      options,
+      globalConfig.taskPollIntervalMs,
+    );
 
     const totalCount = result.success + result.fail;
     blankLine();
@@ -292,19 +312,19 @@ export async function runAllTasks(
       if (shouldNotifyRunAbort) {
         notifyError('TAKT', getLabel('run.notifyAbort', undefined, { failed: String(result.fail) }));
       }
-      await sendSlackSummary();
+      await sendSlackSummary(result.executedTaskNames);
       return;
     }
 
     if (shouldNotifyRunComplete) {
       notifySuccess('TAKT', getLabel('run.notifyComplete', undefined, { total: String(totalCount) }));
     }
-    await sendSlackSummary();
+    await sendSlackSummary(result.executedTaskNames);
   } catch (e) {
     if (shouldNotifyRunAbort) {
       notifyError('TAKT', getLabel('run.notifyAbort', undefined, { failed: getErrorMessage(e) }));
     }
-    await sendSlackSummary();
+    await sendSlackSummary([]);
     throw e;
   }
 }

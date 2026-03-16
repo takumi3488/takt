@@ -8,6 +8,7 @@ import { z } from 'zod/v4';
 import { DEFAULT_LANGUAGE } from '../../shared/constants.js';
 import { McpServersSchema } from './mcp-schemas.js';
 import { INTERACTIVE_MODES } from './interactive-mode.js';
+import { STATUS_VALUES } from './status.js';
 
 export { McpServerConfigSchema, McpServersSchema } from './mcp-schemas.js';
 
@@ -44,18 +45,7 @@ export const TaktConfigSchema = z.object({
 export const AgentTypeSchema = z.enum(['coder', 'architect', 'supervisor', 'custom']);
 
 /** Status schema */
-export const StatusSchema = z.enum([
-  'pending',
-  'done',
-  'blocked',
-  'error',
-  'approved',
-  'rejected',
-  'improve',
-  'cancelled',
-  'interrupted',
-  'answer',
-]);
+export const StatusSchema = z.enum(STATUS_VALUES);
 
 /** Permission mode schema for tool execution */
 export const PermissionModeSchema = z.enum(['readonly', 'edit', 'full']);
@@ -74,12 +64,55 @@ export const MovementProviderOptionsSchema = z.object({
     network_access: z.boolean().optional(),
   }).optional(),
   claude: z.object({
+    allowed_tools: z.array(z.string()).optional(),
     sandbox: ClaudeSandboxSchema,
   }).optional(),
 }).optional();
 
 /** Provider key schema for profile maps */
 export const ProviderProfileNameSchema = z.enum(['claude', 'codex', 'opencode', 'cursor', 'copilot', 'mock']);
+export const ProviderTypeSchema = ProviderProfileNameSchema;
+
+export const ProviderBlockSchema = z.object({
+  type: ProviderTypeSchema,
+  model: z.string().optional(),
+  network_access: z.boolean().optional(),
+  sandbox: ClaudeSandboxSchema,
+}).strict().superRefine((provider, ctx) => {
+  const hasNetworkAccess = provider.network_access !== undefined;
+  const hasSandbox = provider.sandbox !== undefined;
+
+  if (provider.type === 'claude') {
+    if (hasNetworkAccess) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['network_access'],
+        message: "provider.type 'claude' does not support 'network_access'.",
+      });
+    }
+    return;
+  }
+
+  if (provider.type === 'codex' || provider.type === 'opencode') {
+    if (hasSandbox) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['sandbox'],
+        message: `provider.type '${provider.type}' does not support 'sandbox'.`,
+      });
+    }
+    return;
+  }
+
+  if (hasNetworkAccess || hasSandbox) {
+    ctx.addIssue({
+      code: 'custom',
+      message: `provider.type '${provider.type}' does not support provider-specific options in provider block.`,
+    });
+  }
+});
+
+export const ProviderReferenceSchema = z.union([ProviderTypeSchema, ProviderBlockSchema]);
 
 /** Provider permission profile schema */
 export const ProviderPermissionProfileSchema = z.object({
@@ -93,6 +126,7 @@ export const ProviderPermissionProfilesSchema = z.object({
   codex: ProviderPermissionProfileSchema.optional(),
   opencode: ProviderPermissionProfileSchema.optional(),
   cursor: ProviderPermissionProfileSchema.optional(),
+  copilot: ProviderPermissionProfileSchema.optional(),
   mock: ProviderPermissionProfileSchema.optional(),
 }).optional();
 
@@ -111,6 +145,7 @@ export const RuntimeConfigSchema = z.object({
 
 /** Piece-level provider options schema */
 export const PieceProviderOptionsSchema = z.object({
+  provider: ProviderReferenceSchema.optional(),
   provider_options: MovementProviderOptionsSchema,
   runtime: RuntimeConfigSchema,
 }).optional();
@@ -128,11 +163,11 @@ export const PieceProviderOptionsSchema = z.object({
 export const OutputContractItemSchema = z.object({
   /** Report file name */
   name: z.string().min(1),
-  /** Instruction appended after instruction_template (e.g., output format) */
+  /** Instruction appended after movement instruction (e.g., output format) */
   format: z.string().min(1),
   /** Whether this report is used as input for status judgment phase */
   use_judge: z.boolean().optional().default(true),
-  /** Instruction prepended before instruction_template (e.g., output destination) */
+  /** Instruction prepended before movement instruction (e.g., output destination) */
   order: z.string().optional(),
 });
 
@@ -167,6 +202,8 @@ export const PieceOverridesSchema = z.object({
   quality_gates_edit_only: z.boolean().optional(),
   /** Movement-specific quality gates overrides */
   movements: z.record(z.string(), MovementQualityGatesOverrideSchema).optional(),
+  /** Persona-specific quality gates overrides */
+  personas: z.record(z.string(), MovementQualityGatesOverrideSchema).optional(),
 }).optional();
 
 /** Rule-based transition schema (new unified format) */
@@ -260,9 +297,9 @@ export const ParallelSubMovementRawSchema = z.object({
   policy: z.union([z.string(), z.array(z.string())]).optional(),
   /** Knowledge reference(s) — key name(s) from piece-level knowledge map */
   knowledge: z.union([z.string(), z.array(z.string())]).optional(),
-  allowed_tools: z.array(z.string()).optional(),
+  allowed_tools: z.never().optional(),
   mcp_servers: McpServersSchema,
-  provider: z.enum(['claude', 'codex', 'opencode', 'cursor', 'copilot', 'mock']).optional(),
+  provider: ProviderReferenceSchema.optional(),
   model: z.string().optional(),
   /** Deprecated alias */
   permission_mode: z.never().optional(),
@@ -293,9 +330,9 @@ export const PieceMovementRawSchema = z.object({
   policy: z.union([z.string(), z.array(z.string())]).optional(),
   /** Knowledge reference(s) — key name(s) from piece-level knowledge map */
   knowledge: z.union([z.string(), z.array(z.string())]).optional(),
-  allowed_tools: z.array(z.string()).optional(),
+  allowed_tools: z.never().optional(),
   mcp_servers: McpServersSchema,
-  provider: z.enum(['claude', 'codex', 'opencode', 'cursor', 'copilot', 'mock']).optional(),
+  provider: ProviderReferenceSchema.optional(),
   model: z.string().optional(),
   /** Deprecated alias */
   permission_mode: z.never().optional(),
@@ -340,7 +377,9 @@ export const LoopMonitorRuleSchema = z.object({
 export const LoopMonitorJudgeSchema = z.object({
   /** Persona reference — key name from piece-level personas map, or file path */
   persona: z.string().optional(),
-  /** Custom instruction template for the judge */
+  /** Custom judge instruction */
+  instruction: z.string().optional(),
+  /** Deprecated alias */
   instruction_template: z.string().optional(),
   /** Rules for the judge's decision */
   rules: z.array(LoopMonitorRuleSchema).min(1),
@@ -386,9 +425,23 @@ export const PieceConfigRawSchema = z.object({
 });
 
 export const PersonaProviderEntrySchema = z.object({
-  provider: z.enum(['claude', 'codex', 'opencode', 'cursor', 'copilot', 'mock']).optional(),
+  provider: ProviderTypeSchema.optional(),
   model: z.string().optional(),
-});
+}).strict().refine(
+  (entry) => entry.provider !== undefined || entry.model !== undefined,
+  { message: "persona_providers entry must include either 'provider' or 'model'" }
+);
+
+export const PersonaProviderBlockSchema = z.object({
+  type: ProviderTypeSchema,
+  model: z.string().optional(),
+}).strict();
+
+export const PersonaProviderReferenceSchema = z.union([
+  ProviderTypeSchema,
+  PersonaProviderBlockSchema,
+  PersonaProviderEntrySchema,
+]);
 
 /** Custom agent configuration schema */
 export const CustomAgentConfigSchema = z.object({
@@ -403,8 +456,12 @@ export const CustomAgentConfigSchema = z.object({
   { message: 'Agent must have prompt_file, prompt, claude_agent, or claude_skill' }
 );
 
-export const ObservabilityConfigSchema = z.object({
+export const LoggingConfigSchema = z.object({
+  level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+  trace: z.boolean().optional(),
+  debug: z.boolean().optional(),
   provider_events: z.boolean().optional(),
+  usage_events: z.boolean().optional(),
 });
 
 /** Analytics config schema */
@@ -422,7 +479,7 @@ export const PipelineConfigSchema = z.object({
   default_branch_prefix: z.string().optional(),
   commit_message_template: z.string().optional(),
   pr_body_template: z.string().optional(),
-});
+}).strict();
 
 /** Piece category config schema (recursive) */
 export type PieceCategoryConfigNode = {
@@ -438,20 +495,56 @@ export const PieceCategoryConfigNodeSchema: z.ZodType<PieceCategoryConfigNode> =
 
 export const PieceCategoryConfigSchema = z.record(z.string(), PieceCategoryConfigNodeSchema);
 
-/** Global config schema */
-export const GlobalConfigSchema = z.object({
-  language: LanguageSchema.optional().default(DEFAULT_LANGUAGE),
-  log_level: z.enum(['debug', 'info', 'warn', 'error']).optional().default('info'),
-  provider: z.enum(['claude', 'codex', 'opencode', 'cursor', 'copilot', 'mock']).optional().default('claude'),
+/** Project config schema */
+export const ProjectConfigSchema = z.object({
+  provider: ProviderReferenceSchema.optional(),
   model: z.string().optional(),
-  observability: ObservabilityConfigSchema.optional(),
   analytics: AnalyticsConfigSchema.optional(),
+  /** Allow git hooks during TAKT-managed auto-commit */
+  allow_git_hooks: z.boolean().optional(),
+  /** Allow git filters during TAKT-managed auto-commit */
+  allow_git_filters: z.boolean().optional(),
+  /** Auto-create PR after worktree execution (project override) */
+  auto_pr: z.boolean().optional(),
+  /** Create PR as draft (project override) */
+  draft_pr: z.boolean().optional(),
+  pipeline: PipelineConfigSchema.optional(),
+  persona_providers: z.record(z.string(), PersonaProviderReferenceSchema).optional(),
+  branch_name_strategy: z.enum(['romaji', 'ai']).optional(),
+  minimal_output: z.boolean().optional(),
+  provider_options: MovementProviderOptionsSchema,
+  provider_profiles: ProviderPermissionProfilesSchema,
+  /** Project-level runtime environment configuration */
+  runtime: RuntimeConfigSchema,
+  /** Number of tasks to run concurrently in takt run (default from global: 1, max: 10) */
+  concurrency: z.number().int().min(1).max(10).optional(),
+  /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */
+  task_poll_interval_ms: z.number().int().min(100).max(5000).optional(),
+  /** Number of movement previews to inject into interactive mode (0 to disable, max 10) */
+  interactive_preview_movements: z.number().int().min(0).max(10).optional(),
+  /** Base branch to clone from (overrides global base_branch) */
+  base_branch: z.string().optional(),
+  /** Piece-level overrides (quality_gates, etc.) */
+  piece_overrides: PieceOverridesSchema,
+  /** Submodule acquisition mode (all or explicit path list) */
+  submodules: z.union([
+    z.string().refine((value) => value.trim().toLowerCase() === 'all', {
+      message: 'Invalid submodules: string value must be "all"',
+    }),
+    z.array(z.string().min(1)).refine((paths) => paths.every((path) => !path.includes('*')), {
+      message: 'Invalid submodules: path entries must not include wildcard "*"',
+    }),
+  ]).optional(),
+  /** Compatibility flag for full submodule acquisition when submodules is unset */
+  with_submodules: z.boolean().optional(),
+}).strict();
+
+/** Global-only fields (not in ProjectConfig) */
+const GlobalOnlyConfigSchema = z.object({
+  language: LanguageSchema.optional().default(DEFAULT_LANGUAGE),
+  logging: LoggingConfigSchema.optional(),
   /** Directory for shared clones (worktree_dir in config). If empty, uses ../{clone-name} relative to project */
   worktree_dir: z.string().optional(),
-  /** Auto-create PR after worktree execution (default: prompt in interactive mode) */
-  auto_pr: z.boolean().optional(),
-  /** Create PR as draft (default: prompt in interactive mode when auto_pr is true) */
-  draft_pr: z.boolean().optional(),
   /** List of builtin piece/agent names to exclude from fallback loading */
   disabled_builtins: z.array(z.string()).optional().default([]),
   /** Enable builtin pieces from builtins/{lang}/pieces */
@@ -460,6 +553,14 @@ export const GlobalConfigSchema = z.object({
   anthropic_api_key: z.string().optional(),
   /** OpenAI API key for Codex SDK (overridden by TAKT_OPENAI_API_KEY env var) */
   openai_api_key: z.string().optional(),
+  /** Gemini API key (overridden by TAKT_GEMINI_API_KEY env var) */
+  gemini_api_key: z.string().optional(),
+  /** Google API key (overridden by TAKT_GOOGLE_API_KEY env var) */
+  google_api_key: z.string().optional(),
+  /** Groq API key (overridden by TAKT_GROQ_API_KEY env var) */
+  groq_api_key: z.string().optional(),
+  /** OpenRouter API key (overridden by TAKT_OPENROUTER_API_KEY env var) */
+  openrouter_api_key: z.string().optional(),
   /** External Codex CLI path for Codex SDK override (overridden by TAKT_CODEX_CLI_PATH env var) */
   codex_cli_path: z.string().optional(),
   /** External Claude Code CLI path (overridden by TAKT_CLAUDE_CLI_PATH env var) */
@@ -474,27 +575,10 @@ export const GlobalConfigSchema = z.object({
   opencode_api_key: z.string().optional(),
   /** Cursor API key for Cursor Agent CLI/API (overridden by TAKT_CURSOR_API_KEY env var) */
   cursor_api_key: z.string().optional(),
-  /** Pipeline execution settings */
-  pipeline: PipelineConfigSchema.optional(),
-  /** Minimal output mode for CI - suppress AI output to prevent sensitive information leaks */
-  minimal_output: z.boolean().optional().default(false),
   /** Path to bookmarks file (default: ~/.takt/preferences/bookmarks.yaml) */
   bookmarks_file: z.string().optional(),
   /** Path to piece categories file (default: ~/.takt/preferences/piece-categories.yaml) */
   piece_categories_file: z.string().optional(),
-  /** Per-persona provider and model overrides. */
-  persona_providers: z.record(z.string(), z.union([
-    z.enum(['claude', 'codex', 'opencode', 'cursor', 'copilot', 'mock']),
-    PersonaProviderEntrySchema,
-  ])).optional(),
-  /** Global provider-specific options (lowest priority) */
-  provider_options: MovementProviderOptionsSchema,
-  /** Provider-specific permission profiles */
-  provider_profiles: ProviderPermissionProfilesSchema,
-  /** Global runtime defaults (piece runtime overrides this) */
-  runtime: RuntimeConfigSchema,
-  /** Branch name generation strategy: 'romaji' (fast, default) or 'ai' (slow) */
-  branch_name_strategy: z.enum(['romaji', 'ai']).optional(),
   /** Prevent macOS idle sleep during takt execution using caffeinate (default: false) */
   prevent_sleep: z.boolean().optional(),
   /** Enable notification sounds (default: true when undefined) */
@@ -507,52 +591,18 @@ export const GlobalConfigSchema = z.object({
     run_complete: z.boolean().optional(),
     run_abort: z.boolean().optional(),
   }).optional(),
-  /** Number of movement previews to inject into interactive mode (0 to disable, max 10) */
-  interactive_preview_movements: z.number().int().min(0).max(10).optional().default(3),
-  /** Verbose output mode */
-  verbose: z.boolean().optional().default(false),
-  /** Number of tasks to run concurrently in takt run (default: 1 = sequential, max: 10) */
-  concurrency: z.number().int().min(1).max(10).optional().default(1),
-  /** Polling interval in ms for picking up new tasks during takt run (default: 500, range: 100-5000) */
-  task_poll_interval_ms: z.number().int().min(100).max(5000).optional().default(500),
   /** Opt-in: fetch remote before cloning to keep clones up-to-date (default: false) */
   auto_fetch: z.boolean().optional().default(false),
-  /** Base branch to clone from (default: current branch) */
-  base_branch: z.string().optional(),
-  /** Piece-level overrides (quality_gates, etc.) */
-  piece_overrides: PieceOverridesSchema,
 });
 
-/** Project config schema */
-export const ProjectConfigSchema = z.object({
-  piece: z.string().optional(),
-  provider: z.enum(['claude', 'codex', 'opencode', 'cursor', 'copilot', 'mock']).optional(),
-  model: z.string().optional(),
-  provider_options: MovementProviderOptionsSchema,
-  provider_profiles: ProviderPermissionProfilesSchema,
-  /** Number of tasks to run concurrently in takt run (default from global: 1, max: 10) */
-  concurrency: z.number().int().min(1).max(10).optional(),
-  /** Base branch to clone from (overrides global base_branch) */
-  base_branch: z.string().optional(),
-  /** Piece-level overrides (quality_gates, etc.) */
-  piece_overrides: PieceOverridesSchema,
-  /** Submodule acquisition mode (all or explicit path list) */
-  submodules: z.union([
-    z.string().refine((value) => value.trim().toLowerCase() === 'all', {
-      message: 'submodules string value must be "all"',
-    }),
-    z.array(z.string().min(1)).refine((paths) => paths.every((path) => !path.includes('*')), {
-      message: 'submodules path entries must not include wildcard "*"',
-    }),
-  ]).optional(),
-  /** Compatibility flag for full submodule acquisition when submodules is unset */
-  with_submodules: z.boolean().optional(),
-  /** Claude Code CLI path override (project-level) */
-  claude_cli_path: z.string().optional(),
-  /** Codex CLI path override (project-level) */
-  codex_cli_path: z.string().optional(),
-  /** cursor-agent CLI path override (project-level) */
-  cursor_cli_path: z.string().optional(),
-  /** Copilot CLI path override (project-level) */
-  copilot_cli_path: z.string().optional(),
-});
+/** Global config schema = ProjectConfig + global-only fields.
+ *  For overlapping keys (provider, model, etc.), GlobalOnly definitions take precedence in the schema.
+ *  Runtime value priority (project > global) is handled by the resolution layer. */
+export const GlobalConfigSchema = ProjectConfigSchema
+  .omit({ submodules: true, with_submodules: true })
+  .merge(GlobalOnlyConfigSchema)
+  .extend({
+    /** Override provider with default value for global config */
+    provider: ProviderReferenceSchema.optional().default('claude'),
+  })
+  .strict();

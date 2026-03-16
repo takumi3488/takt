@@ -204,13 +204,35 @@ return storage.upload(file, options)
 - UI/logic exceeding 50 lines → Separate
 - Has multiple responsibilities → Separate
 
+### Reachability When Adding Features
+
+When adding a new feature or screen, update the paths by which users reach it in the same change set. Framework-specific wiring belongs in domain knowledge.
+
+| Criteria | Judgment |
+|----------|----------|
+| A new feature is implemented but callers, entry points, or navigation are not updated | REJECT |
+| A user-facing feature is added without defining how users reach it | REJECT |
+| Implementation and reachability updates are made in the same change set | OK |
+| A temporary entry path is added and its purpose/removal condition is documented | OK |
+
 ### Dependency Direction
 
 - Upper layers → Lower layers (reverse direction prohibited)
 - Fetch data at the root (View/Controller) and pass it down
 - Children do not know about their parents
 
-### State Management
+### Align execution triggers with actual intent
+
+Dependencies and triggers must match the conditions under which the behavior should actually run again. Do not add triggers only to satisfy linting or implementation convenience if that changes runtime behavior.
+
+| Criteria | Judgment |
+|----------|----------|
+| Dependencies or triggers are expanded only for linting/convenience and create rerun loops | REJECT |
+| Initial processing reruns because of unrelated state changes or recreated callbacks | REJECT |
+| Rerun conditions correspond to URL, filters, explicit refresh actions, or other intended behavior | OK |
+| Initialization and later refetch triggers are designed separately | OK |
+
+## State Management
 
 - Confine state to where it is used
 - Children do not modify state directly (notify parents via events)
@@ -304,6 +326,73 @@ function formatCurrency(amount: number): string { ... }
 function formatDate(date: Date): string { ... }
 function formatPercentage(value: number): string { ... }
 ```
+
+## Same Implementation with Different Names (DRY Violation)
+
+AI tends to define the same logic under multiple function names.
+
+| Pattern | Example | Verdict |
+|---------|---------|---------|
+| Same implementation with different names | `copyFacets()` and `placeFacetFiles()` doing the same thing | REJECT |
+| Same parameter signature and body | Two functions taking the same params and doing the same work | REJECT |
+
+```typescript
+// REJECT - Same implementation exists under different names
+function copyFiles(src: string, dest: string): void {
+  for (const f of readdirSync(src)) {
+    copyFileSync(join(src, f), join(dest, f));
+  }
+}
+function placeFiles(src: string, dest: string): void {
+  for (const f of readdirSync(src)) {
+    copyFileSync(join(src, f), join(dest, f));
+  }
+}
+
+// OK - Consolidate into a single function
+function copyFiles(src: string, dest: string): void {
+  for (const f of readdirSync(src)) {
+    copyFileSync(join(src, f), join(dest, f));
+  }
+}
+```
+
+Verification approach:
+1. Check if newly added functions have bodies identical or nearly identical to existing functions
+2. Compare functions within the same file and within the same module
+3. If duplication is found, consolidate into one and unify call sites
+
+## Dangerous Stateful Regex Patterns
+
+Regular expressions with the `/g` flag are stateful (they retain `lastIndex`). Defining them at module scope and mixing `test()` and `replace()` causes unexpected results.
+
+| Pattern | Example | Verdict |
+|---------|---------|---------|
+| Module-scope `/g` regex used with `test()` | `const RE = /x/g; if (RE.test(s)) ...` | REJECT |
+| `/g` regex shared between `test()` and `replace()` | `RE.test(s)` followed by `s.replace(RE, ...)` | REJECT |
+
+```typescript
+// REJECT - Module-scope /g regex used with test()
+const PATTERN = /\{\{facet:(\w+)\}\}/g;
+function hasFacetRef(text: string): boolean {
+  return PATTERN.test(text);  // lastIndex advances, next call returns different result
+}
+
+// OK - Don't use /g for test(), or create new RegExp inside function
+const PATTERN_CHECK = /\{\{facet:(\w+)\}\}/;  // no /g
+const PATTERN_REPLACE = /\{\{facet:(\w+)\}\}/g;  // /g for replace
+function hasFacetRef(text: string): boolean {
+  return PATTERN_CHECK.test(text);
+}
+function replaceFacetRefs(text: string): string {
+  return text.replace(PATTERN_REPLACE, ...);
+}
+```
+
+Verification approach:
+1. Check if module-scope regexes have the `/g` flag
+2. Check if `/g` regexes are used with `test()`
+3. Check if the same regex is used with both `test()` and `replace()`
 
 ## Prohibited
 

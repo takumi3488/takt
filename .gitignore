@@ -23,27 +23,16 @@ npm-debug.log*
 # Test coverage
 coverage/
 
+# E2E test results
+e2e/results/
+
 # Environment
 .env
 .env.local
 .env.*.local
 .envrc
 
-# TAKT config (user data)
-.takt/
-!.takt/config.yaml
-!.takt/pieces/
-!.takt/pieces/**
-!.takt/personas/
-!.takt/personas/**
-!.takt/policies/
-!.takt/policies/**
-!.takt/knowledge/
-!.takt/knowledge/**
-!.takt/instructions/
-!.takt/instructions/**
-!.takt/output-contracts/
-!.takt/output-contracts/**
+# TAKT runtime data (facets/pieces/config are managed by .takt/.gitignore)
 
 task_planning/
 

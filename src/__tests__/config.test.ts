@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import {
   getBuiltinPiece,
@@ -13,7 +13,6 @@ import {
   loadPiece,
   listPieces,
   loadPersonaPromptFromPath,
-  setCurrentPiece,
   getProjectConfigDir,
   getBuiltinPersonasDir,
   loadInputHistory,
@@ -38,7 +37,32 @@ import {
   isVerboseMode,
   resolveConfigValue,
   invalidateGlobalConfigCache,
+  invalidateAllResolvedConfigCache,
 } from '../infra/config/index.js';
+
+let isolatedGlobalConfigDir: string;
+let originalTaktConfigDirForFile: string | undefined;
+
+beforeEach(() => {
+  originalTaktConfigDirForFile = process.env.TAKT_CONFIG_DIR;
+  isolatedGlobalConfigDir = join(tmpdir(), `takt-config-test-global-${randomUUID()}`);
+  mkdirSync(isolatedGlobalConfigDir, { recursive: true });
+  process.env.TAKT_CONFIG_DIR = isolatedGlobalConfigDir;
+  writeFileSync(join(isolatedGlobalConfigDir, 'config.yaml'), 'language: en\n', 'utf-8');
+  invalidateGlobalConfigCache();
+});
+
+afterEach(() => {
+  if (originalTaktConfigDirForFile === undefined) {
+    delete process.env.TAKT_CONFIG_DIR;
+  } else {
+    process.env.TAKT_CONFIG_DIR = originalTaktConfigDirForFile;
+  }
+  invalidateGlobalConfigCache();
+  if (existsSync(isolatedGlobalConfigDir)) {
+    rmSync(isolatedGlobalConfigDir, { recursive: true, force: true });
+  }
+});
 
 describe('getBuiltinPiece', () => {
   it('should return builtin piece when it exists in resources', () => {
@@ -53,7 +77,7 @@ describe('getBuiltinPiece', () => {
 
     const planMovement = piece!.movements.find((movement) => movement.name === 'plan');
     expect(planMovement).toBeDefined();
-    expect(planMovement!.instructionTemplate).not.toBe('plan');
+    expect(planMovement!.instruction).not.toBe('plan');
   });
 
   it('should return null for non-existent piece names', () => {
@@ -232,7 +256,7 @@ describe('loadPiece (builtin fallback)', () => {
     expect(piece).toBeNull();
   });
 
-  it('should load builtin pieces like default, research, e2e-test', () => {
+  it('should load builtin pieces like default, research, fill-e2e', () => {
     const defaultPiece = loadPiece('default', process.cwd());
     expect(defaultPiece).not.toBeNull();
     expect(defaultPiece!.name).toBe('default');
@@ -241,9 +265,342 @@ describe('loadPiece (builtin fallback)', () => {
     expect(research).not.toBeNull();
     expect(research!.name).toBe('research');
 
-    const e2eTest = loadPiece('e2e-test', process.cwd());
-    expect(e2eTest).not.toBeNull();
-    expect(e2eTest!.name).toBe('e2e-test');
+    const fillE2e = loadPiece('fill-e2e', process.cwd());
+    expect(fillE2e).not.toBeNull();
+    expect(fillE2e!.name).toBe('fill-e2e');
+  });
+});
+
+describe('loadPiece piece_overrides.personas integration', () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `takt-test-${randomUUID()}`);
+    mkdirSync(join(testDir, '.takt', 'pieces'), { recursive: true });
+  });
+
+  afterEach(() => {
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should apply persona quality gates from global then project configs', () => {
+    writeFileSync(
+      join(isolatedGlobalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'piece_overrides:',
+        '  personas:',
+        '    coder:',
+        '      quality_gates:',
+        '        - "Global persona gate"',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(testDir, '.takt', 'config.yaml'),
+      [
+        'piece_overrides:',
+        '  personas:',
+        '    coder:',
+        '      quality_gates:',
+        '        - "Project persona gate"',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'persona-gates.yaml'),
+      [
+        'name: persona-gates',
+        'description: Persona quality gates integration test',
+        'max_movements: 3',
+        'initial_movement: implement',
+        'movements:',
+        '  - name: implement',
+        '    persona: coder',
+        '    edit: true',
+        '    quality_gates:',
+        '      - "YAML gate"',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const piece = loadPiece('persona-gates', testDir);
+
+    const movement = piece?.movements.find((step) => step.name === 'implement');
+    expect(movement?.qualityGates).toEqual([
+      'Global persona gate',
+      'Project persona gate',
+      'YAML gate',
+    ]);
+  });
+
+  it('should apply persona quality gates when movement persona uses personas section alias key', () => {
+    writeFileSync(
+      join(isolatedGlobalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'piece_overrides:',
+        '  personas:',
+        '    coder:',
+        '      quality_gates:',
+        '        - "Alias key gate"',
+      ].join('\n'),
+      'utf-8',
+    );
+    mkdirSync(join(testDir, '.takt', 'pieces', 'personas'), { recursive: true });
+    writeFileSync(join(testDir, '.takt', 'pieces', 'personas', 'implementer.md'), 'Implementer persona', 'utf-8');
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'persona-alias-key.yaml'),
+      [
+        'name: persona-alias-key',
+        'description: personas alias key should drive override matching',
+        'max_movements: 3',
+        'initial_movement: implement',
+        'personas:',
+        '  coder: ./personas/implementer.md',
+        'movements:',
+        '  - name: implement',
+        '    persona: coder',
+        '    quality_gates:',
+        '      - "YAML gate"',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const piece = loadPiece('persona-alias-key', testDir);
+
+    const movement = piece?.movements.find((step) => step.name === 'implement');
+    expect(movement?.qualityGates).toEqual(['Alias key gate', 'YAML gate']);
+  });
+
+  it('should apply persona quality gates for path personas using basename key', () => {
+    writeFileSync(
+      join(isolatedGlobalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'piece_overrides:',
+        '  personas:',
+        '    implementer:',
+        '      quality_gates:',
+        '        - "Path basename gate"',
+      ].join('\n'),
+      'utf-8',
+    );
+    mkdirSync(join(testDir, '.takt', 'pieces', 'personas'), { recursive: true });
+    writeFileSync(join(testDir, '.takt', 'pieces', 'personas', 'implementer.md'), 'Implementer persona', 'utf-8');
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'persona-path-key.yaml'),
+      [
+        'name: persona-path-key',
+        'description: path personas should match overrides by basename',
+        'max_movements: 3',
+        'initial_movement: implement',
+        'movements:',
+        '  - name: implement',
+        '    persona: ./personas/implementer.md',
+        '    quality_gates:',
+        '      - "YAML gate"',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const piece = loadPiece('persona-path-key', testDir);
+
+    const movement = piece?.movements.find((step) => step.name === 'implement');
+    expect(movement?.qualityGates).toEqual(['Path basename gate', 'YAML gate']);
+  });
+
+  it('should not apply persona quality gates when persona does not match', () => {
+    writeFileSync(
+      join(isolatedGlobalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'piece_overrides:',
+        '  personas:',
+        '    reviewer:',
+        '      quality_gates:',
+        '        - "Reviewer gate"',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'persona-mismatch.yaml'),
+      [
+        'name: persona-mismatch',
+        'description: Persona mismatch integration test',
+        'max_movements: 3',
+        'initial_movement: implement',
+        'movements:',
+        '  - name: implement',
+        '    persona: coder',
+        '    quality_gates:',
+        '      - "YAML gate"',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const piece = loadPiece('persona-mismatch', testDir);
+
+    const movement = piece?.movements.find((step) => step.name === 'implement');
+    expect(movement?.qualityGates).toEqual(['YAML gate']);
+  });
+
+  it('should not apply persona quality gates when movement has no persona', () => {
+    writeFileSync(
+      join(isolatedGlobalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'piece_overrides:',
+        '  personas:',
+        '    reviewer:',
+        '      quality_gates:',
+        '        - "Reviewer gate"',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'no-persona-reviewer.yaml'),
+      [
+        'name: no-persona-reviewer',
+        'description: No persona movement should not match persona overrides',
+        'max_movements: 3',
+        'initial_movement: reviewer',
+        'movements:',
+        '  - name: reviewer',
+        '    quality_gates:',
+        '      - "YAML gate"',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const piece = loadPiece('no-persona-reviewer', testDir);
+
+    const movement = piece?.movements.find((step) => step.name === 'reviewer');
+    expect(movement?.qualityGates).toEqual(['YAML gate']);
+  });
+
+  it('should not apply persona quality gates from persona_name without persona', () => {
+    writeFileSync(
+      join(isolatedGlobalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'piece_overrides:',
+        '  personas:',
+        '    reviewer:',
+        '      quality_gates:',
+        '        - "Reviewer gate"',
+      ].join('\n'),
+      'utf-8',
+    );
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'persona-name-only.yaml'),
+      [
+        'name: persona-name-only',
+        'description: persona_name should be display-only for persona overrides',
+        'max_movements: 3',
+        'initial_movement: review',
+        'movements:',
+        '  - name: review',
+        '    persona_name: reviewer',
+        '    quality_gates:',
+        '      - "YAML gate"',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    const piece = loadPiece('persona-name-only', testDir);
+
+    const movement = piece?.movements.find((step) => step.name === 'review');
+    expect(movement?.qualityGates).toEqual(['YAML gate']);
+  });
+
+  it('should throw when movement persona is an empty string', () => {
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'empty-persona.yaml'),
+      [
+        'name: empty-persona',
+        'description: Empty persona should fail fast',
+        'max_movements: 3',
+        'initial_movement: implement',
+        'movements:',
+        '  - name: implement',
+        '    persona: "   "',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    expect(() => loadPiece('empty-persona', testDir)).toThrow('Movement "implement" has an empty persona value');
+  });
+
+  it('should throw when movement persona_name is an empty string', () => {
+    writeFileSync(
+      join(testDir, '.takt', 'pieces', 'empty-persona-name.yaml'),
+      [
+        'name: empty-persona-name',
+        'description: Empty persona_name should fail fast',
+        'max_movements: 3',
+        'initial_movement: implement',
+        'movements:',
+        '  - name: implement',
+        '    persona: coder',
+        '    persona_name: "   "',
+        '    rules:',
+        '      - condition: Done',
+        '        next: COMPLETE',
+        '    instruction: "{task}"',
+      ].join('\n'),
+      'utf-8',
+    );
+    invalidateGlobalConfigCache();
+    invalidateAllResolvedConfigCache();
+
+    expect(() => loadPiece('empty-persona-name', testDir)).toThrow('Movement "implement" has an empty persona_name value');
   });
 });
 
@@ -264,7 +621,7 @@ describe('listPieces (builtin fallback)', () => {
   it('should include builtin pieces', () => {
     const pieces = listPieces(testDir);
     expect(pieces).toContain('default');
-    expect(pieces).toContain('e2e-test');
+    expect(pieces).toContain('fill-e2e');
   });
 
   it('should return sorted list', () => {
@@ -308,47 +665,6 @@ describe('loadPersonaPromptFromPath (builtin paths)', () => {
   });
 });
 
-describe('setCurrentPiece', () => {
-  let testDir: string;
-
-  beforeEach(() => {
-    testDir = join(tmpdir(), `takt-test-${randomUUID()}`);
-    mkdirSync(testDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-  });
-
-  it('should save piece name to config.yaml', () => {
-    setCurrentPiece(testDir, 'my-piece');
-
-    const config = loadProjectConfig(testDir);
-
-    expect(config.piece).toBe('my-piece');
-  });
-
-  it('should create config directory if not exists', () => {
-    const configDir = getProjectConfigDir(testDir);
-    expect(existsSync(configDir)).toBe(false);
-
-    setCurrentPiece(testDir, 'test');
-
-    expect(existsSync(configDir)).toBe(true);
-  });
-
-  it('should overwrite existing piece name', () => {
-    setCurrentPiece(testDir, 'first');
-    setCurrentPiece(testDir, 'second');
-
-    const piece = loadProjectConfig(testDir).piece;
-
-    expect(piece).toBe('second');
-  });
-});
-
 describe('loadProjectConfig provider_options', () => {
   let testDir: string;
 
@@ -367,7 +683,6 @@ describe('loadProjectConfig provider_options', () => {
     const projectConfigDir = getProjectConfigDir(testDir);
     mkdirSync(projectConfigDir, { recursive: true });
     writeFileSync(join(projectConfigDir, 'config.yaml'), [
-      'piece: default',
       'provider_options:',
       '  codex:',
       '    network_access: true',
@@ -398,6 +713,72 @@ describe('loadProjectConfig provider_options', () => {
     } else {
       process.env.TAKT_PROVIDER_OPTIONS_CODEX_NETWORK_ACCESS = original;
     }
+  });
+
+  it('should throw when provider block uses claude with network_access', () => {
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), [
+      'provider:',
+      '  type: claude',
+      '  network_access: true',
+    ].join('\n'));
+
+    expect(() => loadProjectConfig(testDir)).toThrow(/network_access/);
+  });
+
+  it('should normalize project provider block into provider/model/providerOptions', () => {
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), [
+      'provider:',
+      '  type: codex',
+      '  model: gpt-5.3',
+      '  network_access: false',
+    ].join('\n'));
+
+    const config = loadProjectConfig(testDir);
+
+    expect(config.provider).toBe('codex');
+    expect(config.model).toBe('gpt-5.3');
+    expect(config.providerOptions).toEqual({
+      codex: { networkAccess: false },
+    });
+  });
+
+  it('should throw when provider block uses codex with sandbox', () => {
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), [
+      'provider:',
+      '  type: codex',
+      '  sandbox:',
+      '    allow_unsandboxed_commands: true',
+    ].join('\n'));
+
+    expect(() => loadProjectConfig(testDir)).toThrow(/sandbox/);
+  });
+
+  it('should throw when provider block contains unknown fields', () => {
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), [
+      'provider:',
+      '  type: codex',
+      '  unknown_option: true',
+    ].join('\n'));
+
+    expect(() => loadProjectConfig(testDir)).toThrow(/Configuration error: invalid provider/);
+  });
+
+  it('should throw when project provider has unsupported type', () => {
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), [
+      'provider: invalid-provider',
+    ].join('\n'));
+
+    expect(() => loadProjectConfig(testDir)).toThrow(/provider/);
   });
 });
 
@@ -454,7 +835,6 @@ describe('analytics config resolution', () => {
     const projectConfigDir = getProjectConfigDir(testDir);
     mkdirSync(projectConfigDir, { recursive: true });
     writeFileSync(join(projectConfigDir, 'config.yaml'), [
-      'piece: default',
       'analytics:',
       '  enabled: false',
       '  events_path: .takt/project-analytics/events',
@@ -497,7 +877,6 @@ describe('analytics config resolution', () => {
     const projectConfigDir = getProjectConfigDir(testDir);
     mkdirSync(projectConfigDir, { recursive: true });
     writeFileSync(join(projectConfigDir, 'config.yaml'), [
-      'piece: default',
       'analytics:',
       '  events_path: /tmp/project-analytics',
       '  retention_days: 14',
@@ -510,20 +889,71 @@ describe('analytics config resolution', () => {
       retentionDays: 14,
     });
   });
+
+  it('should expand "~/" in global analytics.events_path when resolved', () => {
+    const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
+    mkdirSync(globalConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, 'config.yaml'), [
+      'language: ja',
+      'analytics:',
+      '  enabled: true',
+      '  events_path: ~/.takt/global-analytics',
+      '  retention_days: 30',
+    ].join('\n'));
+
+    const analytics = resolveConfigValue(testDir, 'analytics');
+
+    expect(analytics).toEqual({
+      enabled: true,
+      eventsPath: join(homedir(), '.takt/global-analytics'),
+      retentionDays: 30,
+    });
+  });
+
+  it('should expand "~/" in project analytics.events_path and keep project precedence', () => {
+    const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
+    mkdirSync(globalConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, 'config.yaml'), [
+      'language: ja',
+      'analytics:',
+      '  enabled: true',
+      '  events_path: ~/.takt/global-analytics',
+      '  retention_days: 30',
+    ].join('\n'));
+
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), [
+      'analytics:',
+      '  events_path: ~/.takt/project-analytics',
+      '  retention_days: 14',
+    ].join('\n'));
+
+    const analytics = resolveConfigValue(testDir, 'analytics');
+
+    expect(analytics).toEqual({
+      enabled: true,
+      eventsPath: join(homedir(), '.takt/project-analytics'),
+      retentionDays: 14,
+    });
+  });
 });
 
 describe('isVerboseMode', () => {
   let testDir: string;
   let originalTaktConfigDir: string | undefined;
-  let originalTaktVerbose: string | undefined;
+  let originalTaktLoggingDebug: string | undefined;
+  let originalTaktLoggingTrace: string | undefined;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `takt-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     originalTaktConfigDir = process.env.TAKT_CONFIG_DIR;
-    originalTaktVerbose = process.env.TAKT_VERBOSE;
+    originalTaktLoggingDebug = process.env.TAKT_LOGGING_DEBUG;
+    originalTaktLoggingTrace = process.env.TAKT_LOGGING_TRACE;
     process.env.TAKT_CONFIG_DIR = join(testDir, 'global-takt');
-    delete process.env.TAKT_VERBOSE;
+    delete process.env.TAKT_LOGGING_DEBUG;
+    delete process.env.TAKT_LOGGING_TRACE;
     invalidateGlobalConfigCache();
   });
 
@@ -533,10 +963,15 @@ describe('isVerboseMode', () => {
     } else {
       process.env.TAKT_CONFIG_DIR = originalTaktConfigDir;
     }
-    if (originalTaktVerbose === undefined) {
-      delete process.env.TAKT_VERBOSE;
+    if (originalTaktLoggingDebug === undefined) {
+      delete process.env.TAKT_LOGGING_DEBUG;
     } else {
-      process.env.TAKT_VERBOSE = originalTaktVerbose;
+      process.env.TAKT_LOGGING_DEBUG = originalTaktLoggingDebug;
+    }
+    if (originalTaktLoggingTrace === undefined) {
+      delete process.env.TAKT_LOGGING_TRACE;
+    } else {
+      process.env.TAKT_LOGGING_TRACE = originalTaktLoggingTrace;
     }
 
     if (existsSync(testDir)) {
@@ -544,67 +979,73 @@ describe('isVerboseMode', () => {
     }
   });
 
-  it('should return project verbose when project config has verbose: true', () => {
-    const projectConfigDir = getProjectConfigDir(testDir);
-    mkdirSync(projectConfigDir, { recursive: true });
-    writeFileSync(join(projectConfigDir, 'config.yaml'), 'piece: default\nverbose: true\n');
-
-    const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
-    mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: false\n');
-
-    expect(isVerboseMode(testDir)).toBe(true);
-  });
-
-  it('should return project verbose when project config has verbose: false', () => {
-    const projectConfigDir = getProjectConfigDir(testDir);
-    mkdirSync(projectConfigDir, { recursive: true });
-    writeFileSync(join(projectConfigDir, 'config.yaml'), 'piece: default\nverbose: false\n');
-
-    const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
-    mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: true\n');
-
+  it('should return false when neither project nor global logging.debug is set', () => {
     expect(isVerboseMode(testDir)).toBe(false);
   });
 
-  it('should fallback to global verbose when project verbose is not set', () => {
-    const projectConfigDir = getProjectConfigDir(testDir);
-    mkdirSync(projectConfigDir, { recursive: true });
-    writeFileSync(join(projectConfigDir, 'config.yaml'), 'piece: default\n');
-
+  it('should return true when global logging.debug is enabled', () => {
     const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
     mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: true\n');
+    writeFileSync(
+      join(globalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'logging:',
+        '  debug: true',
+      ].join('\n'),
+      'utf-8',
+    );
 
     expect(isVerboseMode(testDir)).toBe(true);
   });
 
-  it('should return false when neither project nor global verbose is set', () => {
-    expect(isVerboseMode(testDir)).toBe(false);
-  });
-
-  it('should prioritize TAKT_VERBOSE over project and global config', () => {
-    const projectConfigDir = getProjectConfigDir(testDir);
-    mkdirSync(projectConfigDir, { recursive: true });
-    writeFileSync(join(projectConfigDir, 'config.yaml'), 'piece: default\nverbose: false\n');
-
+  it('should return true when global logging.trace is enabled', () => {
     const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
     mkdirSync(globalConfigDir, { recursive: true });
-    writeFileSync(join(globalConfigDir, 'config.yaml'), 'verbose: false\n');
+    writeFileSync(
+      join(globalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'logging:',
+        '  trace: true',
+      ].join('\n'),
+      'utf-8',
+    );
 
-    process.env.TAKT_VERBOSE = 'true';
     expect(isVerboseMode(testDir)).toBe(true);
   });
 
-  it('should throw on TAKT_VERBOSE=0', () => {
-    process.env.TAKT_VERBOSE = '0';
-    expect(() => isVerboseMode(testDir)).toThrow('TAKT_VERBOSE must be one of: true, false');
+  it('should return true when TAKT_LOGGING_DEBUG=true is set', () => {
+    process.env.TAKT_LOGGING_DEBUG = 'true';
+
+    expect(isVerboseMode(testDir)).toBe(true);
   });
 
-  it('should throw on invalid TAKT_VERBOSE value', () => {
-    process.env.TAKT_VERBOSE = 'yes';
-    expect(() => isVerboseMode(testDir)).toThrow('TAKT_VERBOSE must be one of: true, false');
+  it('should return true when TAKT_LOGGING_TRACE=true is set', () => {
+    process.env.TAKT_LOGGING_TRACE = 'true';
+
+    expect(isVerboseMode(testDir)).toBe(true);
+  });
+
+  it('should return true when global logging.level is debug', () => {
+    const globalConfigDir = process.env.TAKT_CONFIG_DIR!;
+    mkdirSync(globalConfigDir, { recursive: true });
+    writeFileSync(
+      join(globalConfigDir, 'config.yaml'),
+      [
+        'language: en',
+        'logging:',
+        '  level: debug',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    expect(isVerboseMode(testDir)).toBe(true);
+  });
+
+  it('should return true when TAKT_LOGGING_DEBUG=true overrides config', () => {
+    process.env.TAKT_LOGGING_DEBUG = 'true';
+    expect(isVerboseMode(testDir)).toBe(true);
   });
 });
 
@@ -837,7 +1278,7 @@ describe('saveProjectConfig - gitignore copy', () => {
   });
 
   it('should copy .gitignore when creating new config', () => {
-    setCurrentPiece(testDir, 'test');
+    saveProjectConfig(testDir, {});
 
     const configDir = getProjectConfigDir(testDir);
     const gitignorePath = join(configDir, '.gitignore');
@@ -849,10 +1290,10 @@ describe('saveProjectConfig - gitignore copy', () => {
     // Create config directory without .gitignore
     const configDir = getProjectConfigDir(testDir);
     mkdirSync(configDir, { recursive: true });
-    writeFileSync(join(configDir, 'config.yaml'), 'piece: existing\n');
+    writeFileSync(join(configDir, 'config.yaml'), '');
 
     // Save config should still copy .gitignore
-    setCurrentPiece(testDir, 'updated');
+    saveProjectConfig(testDir, {});
 
     const gitignorePath = join(configDir, '.gitignore');
     expect(existsSync(gitignorePath)).toBe(true);
@@ -864,7 +1305,7 @@ describe('saveProjectConfig - gitignore copy', () => {
     const customContent = '# Custom gitignore\nmy-custom-file';
     writeFileSync(join(configDir, '.gitignore'), customContent);
 
-    setCurrentPiece(testDir, 'test');
+    saveProjectConfig(testDir, {});
 
     const gitignorePath = join(configDir, '.gitignore');
     const content = readFileSync(gitignorePath, 'utf-8');
@@ -1319,7 +1760,7 @@ describe('saveProjectConfig snake_case denormalization', () => {
   });
 
   it('should persist autoPr as auto_pr and reload correctly', () => {
-    saveProjectConfig(testDir, { piece: 'default', autoPr: true });
+    saveProjectConfig(testDir, { autoPr: true });
 
     const saved = loadProjectConfig(testDir);
 
@@ -1328,7 +1769,7 @@ describe('saveProjectConfig snake_case denormalization', () => {
   });
 
   it('should persist draftPr as draft_pr and reload correctly', () => {
-    saveProjectConfig(testDir, { piece: 'default', draftPr: true });
+    saveProjectConfig(testDir, { draftPr: true });
 
     const saved = loadProjectConfig(testDir);
 
@@ -1337,7 +1778,7 @@ describe('saveProjectConfig snake_case denormalization', () => {
   });
 
   it('should persist baseBranch as base_branch and reload correctly', () => {
-    saveProjectConfig(testDir, { piece: 'default', baseBranch: 'main' });
+    saveProjectConfig(testDir, { baseBranch: 'main' });
 
     const saved = loadProjectConfig(testDir);
 
@@ -1346,7 +1787,7 @@ describe('saveProjectConfig snake_case denormalization', () => {
   });
 
   it('should persist withSubmodules as with_submodules and reload correctly', () => {
-    saveProjectConfig(testDir, { piece: 'default', withSubmodules: true });
+    saveProjectConfig(testDir, { withSubmodules: true });
 
     const saved = loadProjectConfig(testDir);
 
@@ -1355,7 +1796,7 @@ describe('saveProjectConfig snake_case denormalization', () => {
   });
 
   it('should persist submodules and ignore with_submodules when both are provided', () => {
-    saveProjectConfig(testDir, { piece: 'default', submodules: ['path/a'], withSubmodules: true });
+    saveProjectConfig(testDir, { submodules: ['path/a'], withSubmodules: true });
 
     const projectConfigDir = getProjectConfigDir(testDir);
     const content = readFileSync(join(projectConfigDir, 'config.yaml'), 'utf-8');
@@ -1368,7 +1809,7 @@ describe('saveProjectConfig snake_case denormalization', () => {
   });
 
   it('should persist concurrency and reload correctly', () => {
-    saveProjectConfig(testDir, { piece: 'default', concurrency: 3 });
+    saveProjectConfig(testDir, { concurrency: 3 });
 
     const saved = loadProjectConfig(testDir);
 
@@ -1376,7 +1817,7 @@ describe('saveProjectConfig snake_case denormalization', () => {
   });
 
   it('should not write camelCase keys to YAML file', () => {
-    saveProjectConfig(testDir, { piece: 'default', autoPr: true, draftPr: false, baseBranch: 'develop' });
+    saveProjectConfig(testDir, { autoPr: true, draftPr: false, baseBranch: 'develop' });
 
     const projectConfigDir = getProjectConfigDir(testDir);
     const content = readFileSync(join(projectConfigDir, 'config.yaml'), 'utf-8');
@@ -1430,6 +1871,15 @@ describe('resolveConfigValue autoPr/draftPr/baseBranch/concurrency from project 
     writeFileSync(join(projectConfigDir, 'config.yaml'), 'draft_pr: true\n');
 
     expect(resolveConfigValue(testDir, 'draftPr')).toBe(true);
+  });
+
+  it('should resolve allowGitHooks and allowGitFilters from project config written in snake_case YAML', () => {
+    const projectConfigDir = getProjectConfigDir(testDir);
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(projectConfigDir, 'config.yaml'), 'allow_git_hooks: true\nallow_git_filters: true\n');
+
+    expect(resolveConfigValue(testDir, 'allowGitHooks')).toBe(true);
+    expect(resolveConfigValue(testDir, 'allowGitFilters')).toBe(true);
   });
 
   it('should resolve baseBranch from project config written in snake_case YAML', () => {

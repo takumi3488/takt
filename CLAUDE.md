@@ -35,12 +35,12 @@ TAKT (TAKT Agent Koordination Topology) is a multi-agent orchestration system fo
 | `takt watch` | Watch `.takt/tasks/` and auto-execute tasks (resident process) |
 | `takt add [task]` | Add a new task via AI conversation |
 | `takt list` | List task branches (merge, delete, retry) |
-| `takt switch [piece]` | Switch piece interactively |
 | `takt clear` | Clear agent conversation sessions (reset state) |
 | `takt eject [type] [name]` | Copy builtin piece or facet for customization (`--global` for ~/.takt/) |
 | `takt prompt [piece]` | Preview assembled prompts for each movement and phase |
 | `takt catalog [type]` | List available facets (personas, policies, knowledge, etc.) |
 | `takt export-cc` | Export takt pieces/agents as Claude Code Skill (~/.claude/) |
+| `takt export-codex` | Export takt skill files to Codex Skill (~/.agents/skills/takt/) |
 | `takt reset config` | Reset global config to builtin template |
 | `takt reset categories` | Reset piece categories to builtin defaults |
 | `takt metrics review` | Show review quality metrics |
@@ -163,14 +163,14 @@ Implemented in `src/core/piece/evaluation/RuleEvaluator.ts`. The matched method 
   3. User request (`{task}` — auto-injected unless placeholder present)
   4. Previous response (auto-injected if `pass_previous_response: true`)
   5. User inputs (auto-injected unless `{user_inputs}` placeholder present)
-  6. `instruction_template` content
+  6. `instruction` content
   7. Status output rules (auto-injected for tag-based rules)
 - Localized for `en` and `ja`
 - Related: `ReportInstructionBuilder` (Phase 2), `StatusJudgmentBuilder` (Phase 3)
 
 **Agent Runner** (`src/agents/runner.ts`)
 - Resolves agent specs (name or path) to agent configurations
-- Agent is optional — movements can execute with `instruction_template` only (no system prompt)
+- Agent is optional — movements can execute with `instruction` only (no system prompt)
 - 5-layer resolution for provider/model: CLI `--provider` / `--model` → persona_providers → movement override → project `.takt/config.yaml` → global `~/.takt/config.yaml`
 - Custom personas via `~/.takt/personas/<name>.md` or prompt files (.md)
 - Inline system prompts: If agent file doesn't exist, the agent string is used as inline system prompt
@@ -271,6 +271,7 @@ builtins/                 # Bundled defaults (builtin, read from dist/ at runtim
   ja/                     # Japanese (same structure)
   project/                # Project-level template files
   skill/                  # Claude Code skill files
+  skill-codex/            # Codex skill files
 ```
 
 Builtin resources are embedded in the npm package (`builtins/`). Project files in `.takt/` take highest priority, then user files in `~/.takt/`, then builtins. Use `takt eject` to copy builtins for customization.
@@ -300,7 +301,7 @@ loop_monitors:
     threshold: 3                # Cycles before triggering judge
     judge:
       persona: supervisor
-      instruction_template: "Evaluate if the fix loop is making progress..."
+      instruction: "Evaluate if the fix loop is making progress..."
       rules:
         - condition: "Progress is being made"
           next: fix
@@ -343,7 +344,7 @@ movements:
       my-server:
         command: npx
         args: [-y, my-mcp-server]
-    instruction_template: |
+    instruction: |
       Custom instructions for this movement.
       {task}, {previous_response} are auto-injected if not present as placeholders.
     pass_previous_response: true        # Default: true
@@ -414,7 +415,7 @@ movements:
       part_edit: true                  # Edit permission for parts
       part_permission_mode: edit       # Permission mode for parts
       part_allowed_tools: [Read, Glob, Grep, Edit, Write, Bash]
-    instruction_template: |
+    instruction: |
       Decompose this task into independent subtasks.
     rules:
       - condition: "All parts completed"
@@ -550,7 +551,7 @@ Key rules:
 - Policy REJECT lists are what reviewers enforce. If a criterion is not in the policy REJECT list, reviewers will not catch it — even if knowledge explains the reasoning
 - Knowledge provides the WHY behind policy criteria. Knowledge alone does not trigger enforcement
 - Instructions are bound to a single piece movement. They reference procedures, not principles
-- Piece YAML `instruction_template` is for movement-specific details (which reports to read, movement routing, output templates)
+- Piece YAML `instruction` is for movement-specific details (which reports to read, movement routing, output templates)
 
 **Separation of concerns in piece engine:**
 - `PieceEngine` - Orchestration, state management, event emission
@@ -602,16 +603,23 @@ Implemented in `src/core/runtime/runtime-environment.ts`.
 
 ## Debugging
 
-**Debug logging:** Set `debug_enabled: true` in `~/.takt/config.yaml` or create a `.takt/debug.yaml` file:
+**Debug logging:** Set `logging.debug: true` in `~/.takt/config.yaml`:
 ```yaml
-enabled: true
+logging:
+  debug: true
 ```
 
-Debug logs are written to `.takt/logs/debug.log` (ndjson format). Log levels: `debug`, `info`, `warn`, `error`.
+Debug logs are written to `.takt/runs/debug-{timestamp}/logs/` in NDJSON format. Log levels: `debug`, `info`, `warn`, `error`.
 
-**Verbose mode:** Create `.takt/verbose` file (empty file) to enable verbose console output. This automatically enables debug logging and sets log level to `debug`.
+**Verbose mode:** Set `verbose: true` in `~/.takt/config.yaml` or `TAKT_VERBOSE=true` to enable verbose console output. This enables `logging.debug`, `logging.trace`, and sets `logging.level` to `debug`.
 
 **Session logs:** All piece executions are logged to `.takt/logs/{sessionId}.jsonl`. Use `tail -f .takt/logs/{sessionId}.jsonl` to monitor in real-time.
+
+**Environment variables:**
+
+- `TAKT_LOGGING_LEVEL=info`
+- `TAKT_LOGGING_PROVIDER_EVENTS=true`
+- `TAKT_VERBOSE=true`
 
 **Testing with mocks:** Use `--provider mock` to test pieces without calling real AI APIs. Mock responses are deterministic and configurable via test fixtures.
 

@@ -14,12 +14,13 @@ import { executeAgent } from '../../../agents/agent-usecases.js';
 import { ParallelLogger } from './parallel-logger.js';
 import { needsStatusJudgmentPhase, runReportPhase, runStatusJudgmentPhase } from '../phase-runner.js';
 import { detectMatchedRule } from '../evaluation/index.js';
+import type { StatusJudgmentPhaseResult } from '../phase-runner.js';
 import { incrementMovementIteration } from './state-manager.js';
 import { createLogger, getErrorMessage } from '../../../shared/utils/index.js';
 import { buildSessionKey } from '../session-key.js';
 import type { OptionsBuilder } from './OptionsBuilder.js';
 import type { MovementExecutor } from './MovementExecutor.js';
-import type { PieceEngineOptions, PhaseName } from '../types.js';
+import type { PieceEngineOptions, PhaseName, PhasePromptParts, JudgeStageEntry } from '../types.js';
 import type { ParallelLoggerOptions } from './parallel-logger.js';
 
 const log = createLogger('parallel-runner');
@@ -37,8 +38,33 @@ export interface ParallelRunnerDeps {
     conditions: Array<{ index: number; text: string }>,
     options: { cwd: string }
   ) => Promise<number>;
-  readonly onPhaseStart?: (step: PieceMovement, phase: 1 | 2 | 3, phaseName: PhaseName, instruction: string) => void;
-  readonly onPhaseComplete?: (step: PieceMovement, phase: 1 | 2 | 3, phaseName: PhaseName, content: string, status: string, error?: string) => void;
+  readonly onPhaseStart?: (
+    step: PieceMovement,
+    phase: 1 | 2 | 3,
+    phaseName: PhaseName,
+    instruction: string,
+    promptParts: PhasePromptParts,
+    phaseExecutionId?: string,
+    iteration?: number,
+  ) => void;
+  readonly onPhaseComplete?: (
+    step: PieceMovement,
+    phase: 1 | 2 | 3,
+    phaseName: PhaseName,
+    content: string,
+    status: string,
+    error?: string,
+    phaseExecutionId?: string,
+    iteration?: number,
+  ) => void;
+  readonly onJudgeStage?: (
+    step: PieceMovement,
+    phase: 3,
+    phaseName: 'judge',
+    entry: JudgeStageEntry,
+    phaseExecutionId?: string,
+    iteration?: number,
+  ) => void;
 }
 
 export class ParallelRunner {
@@ -86,6 +112,7 @@ export class ParallelRunner {
       subMovements.map(async (subMovement, index) => {
         const subIteration = incrementMovementIteration(state, subMovement.name);
         const subInstruction = this.deps.movementExecutor.buildInstruction(subMovement, subIteration, state, task, maxMovements);
+        const parentIteration = state.iteration;
 
         // Session key uses buildSessionKey (persona:provider) — same as normal movements.
         // This ensures sessions are shared across movements with the same persona+provider,
@@ -94,19 +121,33 @@ export class ParallelRunner {
 
         // Phase 1: main execution (Write excluded if sub-movement has report)
         const baseOptions = this.deps.optionsBuilder.buildAgentOptions(subMovement);
+        let didEmitPhaseStart = false;
 
         // Override onStream with parallel logger's prefixed handler (immutable)
         const agentOptions = parallelLogger
           ? { ...baseOptions, onStream: parallelLogger.createStreamHandler(subMovement.name, index) }
-          : baseOptions;
-
-        this.deps.onPhaseStart?.(subMovement, 1, 'execute', subInstruction);
+          : { ...baseOptions };
+        agentOptions.onPromptResolved = (promptParts: PhasePromptParts) => {
+          this.deps.onPhaseStart?.(subMovement, 1, 'execute', subInstruction, promptParts, undefined, parentIteration);
+          didEmitPhaseStart = true;
+        };
         const subResponse = await executeAgent(subMovement.persona, subInstruction, agentOptions);
+        if (!didEmitPhaseStart) {
+          throw new Error(`Missing prompt parts for phase start: ${subMovement.name}:1`);
+        }
         updatePersonaSession(subSessionKey, subResponse.sessionId);
-        this.deps.onPhaseComplete?.(subMovement, 1, 'execute', subResponse.content, subResponse.status, subResponse.error);
+        this.deps.onPhaseComplete?.(subMovement, 1, 'execute', subResponse.content, subResponse.status, subResponse.error, undefined, parentIteration);
 
         // Phase 2/3 context — no overrides needed, phase-runner uses buildSessionKey internally
-        const phaseCtx = this.deps.optionsBuilder.buildPhaseRunnerContext(state, subResponse.content, updatePersonaSession, this.deps.onPhaseStart, this.deps.onPhaseComplete);
+        const phaseCtx = this.deps.optionsBuilder.buildPhaseRunnerContext(
+          state,
+          subResponse.content,
+          updatePersonaSession,
+          this.deps.onPhaseStart,
+          this.deps.onPhaseComplete,
+          this.deps.onJudgeStage,
+          parentIteration,
+        );
 
         // Phase 2: report output for sub-movement
         if (subMovement.outputContracts && subMovement.outputContracts.length > 0) {
@@ -114,9 +155,17 @@ export class ParallelRunner {
         }
 
         // Phase 3: status judgment for sub-movement
-        const subPhase3 = needsStatusJudgmentPhase(subMovement)
-          ? await runStatusJudgmentPhase(subMovement, phaseCtx)
-          : undefined;
+        let subPhase3: StatusJudgmentPhaseResult | undefined;
+        try {
+          subPhase3 = needsStatusJudgmentPhase(subMovement)
+            ? await runStatusJudgmentPhase(subMovement, phaseCtx)
+            : undefined;
+        } catch (error) {
+          log.info('Phase 3 status judgment failed for sub-movement, falling back to phase1 rule evaluation', {
+            movement: subMovement.name,
+            error: getErrorMessage(error),
+          });
+        }
 
         let finalResponse: AgentResponse;
         if (subPhase3) {

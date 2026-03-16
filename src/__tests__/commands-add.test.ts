@@ -3,8 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockOpts: Record<string, unknown> = {};
 const mockAddTask = vi.fn();
 
-const { rootCommand, commandActions } = vi.hoisted(() => {
+const { rootCommand, commandActions, commandMocks } = vi.hoisted(() => {
   const commandActions = new Map<string, (...args: unknown[]) => void>();
+  const commandMocks = new Map<string, Record<string, unknown>>();
 
   function createCommandMock(actionKey: string): {
     description: ReturnType<typeof vi.fn>;
@@ -20,6 +21,7 @@ const { rootCommand, commandActions } = vi.hoisted(() => {
       option: vi.fn().mockReturnThis(),
       opts: vi.fn(() => mockOpts),
     };
+    commandMocks.set(actionKey, command);
 
     command.command = vi.fn((subName: string) => createCommandMock(`${actionKey}.${subName}`));
     command.action = vi.fn((action: (...args: unknown[]) => void) => {
@@ -40,6 +42,7 @@ const { rootCommand, commandActions } = vi.hoisted(() => {
   return {
     rootCommand: createCommandMock('root'),
     commandActions,
+    commandMocks,
   };
 });
 
@@ -50,6 +53,7 @@ vi.mock('../app/cli/program.js', () => ({
 }));
 
 vi.mock('../infra/config/index.js', () => ({
+  clearPersonaSessions: vi.fn(),
   resolveConfigValue: vi.fn(),
 }));
 
@@ -70,8 +74,6 @@ vi.mock('../features/tasks/index.js', () => ({
 }));
 
 vi.mock('../features/config/index.js', () => ({
-  clearPersonaSessions: vi.fn(),
-  switchPiece: vi.fn(),
   ejectBuiltin: vi.fn(),
   ejectFacet: vi.fn(),
   parseFacetType: vi.fn(),
@@ -79,6 +81,7 @@ vi.mock('../features/config/index.js', () => ({
   resetCategoriesToDefault: vi.fn(),
   resetConfigToDefault: vi.fn(),
   deploySkill: vi.fn(),
+  deploySkillCodex: vi.fn(),
 }));
 
 vi.mock('../features/prompt/index.js', () => ({
@@ -109,10 +112,11 @@ vi.mock('../commands/repertoire/list.js', () => ({
 }));
 
 import '../app/cli/commands.js';
+const configFeatures = await import('../features/config/index.js');
 
 describe('CLI add command', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockAddTask.mockClear();
     for (const key of Object.keys(mockOpts)) {
       delete mockOpts[key];
     }
@@ -140,5 +144,37 @@ describe('CLI add command', () => {
 
       expect(mockAddTask).toHaveBeenCalledWith('/test/cwd', 'Regular task', undefined);
     });
+  });
+
+  it('should not register switch command', () => {
+    const calledCommandNames = rootCommand.command.mock.calls
+      .map((call: unknown[]) => call[0] as string);
+
+    expect(calledCommandNames).not.toContain('switch');
+  });
+
+  it('should register export-codex command', () => {
+    const calledCommandNames = rootCommand.command.mock.calls
+      .map((call: unknown[]) => call[0] as string);
+
+    expect(calledCommandNames).toContain('export-codex');
+  });
+
+  it('should invoke deploySkillCodex for export-codex command', async () => {
+    const exportCodexAction = commandActions.get('root.export-codex');
+    expect(exportCodexAction).toBeTypeOf('function');
+
+    await exportCodexAction?.();
+    const deploySkillCodex = (configFeatures as Record<string, unknown>).deploySkillCodex;
+    expect(deploySkillCodex).toHaveBeenCalledTimes(1);
+  });
+
+  it('should describe prompt piece argument as defaulting to "default"', () => {
+    const promptCommand = commandMocks.get('root.prompt');
+    expect(promptCommand).toBeTruthy();
+    expect(promptCommand?.argument).toHaveBeenCalledWith(
+      '[piece]',
+      'Piece name or path (defaults to "default")',
+    );
   });
 });

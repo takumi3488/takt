@@ -14,14 +14,15 @@ import type {
   AgentResponse,
   Language,
 } from '../../models/types.js';
-import type { PhaseName } from '../types.js';
+import type { PhaseName, PhasePromptParts, JudgeStageEntry } from '../types.js';
 import { executeAgent } from '../../../agents/agent-usecases.js';
 import { InstructionBuilder } from '../instruction/InstructionBuilder.js';
 import { needsStatusJudgmentPhase, runReportPhase, runStatusJudgmentPhase } from '../phase-runner.js';
 import { detectMatchedRule } from '../evaluation/index.js';
+import type { StatusJudgmentPhaseResult } from '../phase-runner.js';
 import { buildSessionKey } from '../session-key.js';
 import { incrementMovementIteration, getPreviousOutput } from './state-manager.js';
-import { createLogger } from '../../../shared/utils/index.js';
+import { createLogger, getErrorMessage, slugify } from '../../../shared/utils/index.js';
 import type { OptionsBuilder } from './OptionsBuilder.js';
 import type { RunPaths } from '../run/run-paths.js';
 
@@ -45,8 +46,33 @@ export interface MovementExecutorDeps {
     conditions: Array<{ index: number; text: string }>,
     options: { cwd: string }
   ) => Promise<number>;
-  readonly onPhaseStart?: (step: PieceMovement, phase: 1 | 2 | 3, phaseName: PhaseName, instruction: string) => void;
-  readonly onPhaseComplete?: (step: PieceMovement, phase: 1 | 2 | 3, phaseName: PhaseName, content: string, status: string, error?: string) => void;
+  readonly onPhaseStart?: (
+    step: PieceMovement,
+    phase: 1 | 2 | 3,
+    phaseName: PhaseName,
+    instruction: string,
+    promptParts: PhasePromptParts,
+    phaseExecutionId?: string,
+    iteration?: number,
+  ) => void;
+  readonly onPhaseComplete?: (
+    step: PieceMovement,
+    phase: 1 | 2 | 3,
+    phaseName: PhaseName,
+    content: string,
+    status: string,
+    error?: string,
+    phaseExecutionId?: string,
+    iteration?: number,
+  ) => void;
+  readonly onJudgeStage?: (
+    step: PieceMovement,
+    phase: 3,
+    phaseName: 'judge',
+    entry: JudgeStageEntry,
+    phaseExecutionId?: string,
+    iteration?: number,
+  ) => void;
 }
 
 export class MovementExecutor {
@@ -56,6 +82,15 @@ export class MovementExecutor {
 
   private static buildTimestamp(): string {
     return new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  }
+
+  private static buildSnapshotFileName(
+    movementName: string,
+    movementIteration: number,
+    timestamp: string,
+  ): string {
+    const safeMovementName = slugify(movementName) || 'movement';
+    return `${safeMovementName}.${movementIteration}.${timestamp}.md`;
   }
 
   private writeSnapshot(
@@ -84,7 +119,7 @@ export class MovementExecutor {
     const sourcePath = this.writeSnapshot(
       merged,
       directoryRel,
-      `${movementName}.${movementIteration}.${timestamp}.md`,
+      MovementExecutor.buildSnapshotFileName(movementName, movementIteration, timestamp),
     );
     return { content: [merged], sourcePath };
   }
@@ -97,7 +132,7 @@ export class MovementExecutor {
     if (!state.lastOutput || state.previousResponseSourcePath) return;
     const timestamp = MovementExecutor.buildTimestamp();
     const runPaths = this.deps.getRunPaths();
-    const fileName = `${movementName}.${movementIteration}.${timestamp}.md`;
+    const fileName = MovementExecutor.buildSnapshotFileName(movementName, movementIteration, timestamp);
     const sourcePath = this.writeSnapshot(
       state.lastOutput.content,
       runPaths.contextPreviousResponsesRel,
@@ -119,7 +154,7 @@ export class MovementExecutor {
   ): void {
     const timestamp = MovementExecutor.buildTimestamp();
     const runPaths = this.deps.getRunPaths();
-    const fileName = `${movementName}.${movementIteration}.${timestamp}.md`;
+    const fileName = MovementExecutor.buildSnapshotFileName(movementName, movementIteration, timestamp);
     const sourcePath = this.writeSnapshot(content, runPaths.contextPreviousResponsesRel, fileName);
     this.writeSnapshot(content, runPaths.contextPreviousResponsesRel, 'latest.md');
     state.previousResponseSourcePath = sourcePath;
@@ -197,6 +232,8 @@ export class MovementExecutor {
       updatePersonaSession,
       this.deps.onPhaseStart,
       this.deps.onPhaseComplete,
+      this.deps.onJudgeStage,
+      state.iteration,
     );
 
     // Phase 2: report output (resume same session, Write only)
@@ -210,9 +247,17 @@ export class MovementExecutor {
     }
 
     // Phase 3: status judgment (new session, no tools, determines matched rule)
-    const phase3Result = needsStatusJudgmentPhase(step)
-      ? await runStatusJudgmentPhase(step, phaseCtx)
-      : undefined;
+    let phase3Result: StatusJudgmentPhaseResult | undefined;
+    try {
+      phase3Result = needsStatusJudgmentPhase(step)
+        ? await runStatusJudgmentPhase(step, phaseCtx)
+        : undefined;
+    } catch (error) {
+      log.info('Phase 3 status judgment failed, falling back to phase1 rule evaluation', {
+        movement: step.name,
+        error: getErrorMessage(error),
+      });
+    }
 
     if (phase3Result) {
       log.debug('Rule matched (Phase 3)', {
@@ -276,11 +321,21 @@ export class MovementExecutor {
     });
 
     // Phase 1: main execution (Write excluded if movement has report)
-    this.deps.onPhaseStart?.(step, 1, 'execute', instruction);
-    const agentOptions = this.deps.optionsBuilder.buildAgentOptions(step);
+    let didEmitPhaseStart = false;
+    const baseAgentOptions = this.deps.optionsBuilder.buildAgentOptions(step);
+    const agentOptions = {
+      ...baseAgentOptions,
+      onPromptResolved: (promptParts: PhasePromptParts) => {
+        this.deps.onPhaseStart?.(step, 1, 'execute', instruction, promptParts, undefined, state.iteration);
+        didEmitPhaseStart = true;
+      },
+    };
     let response = await executeAgent(step.persona, instruction, agentOptions);
+    if (!didEmitPhaseStart) {
+      throw new Error(`Missing prompt parts for phase start: ${step.name}:1`);
+    }
     updatePersonaSession(sessionKey, response.sessionId);
-    this.deps.onPhaseComplete?.(step, 1, 'execute', response.content, response.status, response.error);
+    this.deps.onPhaseComplete?.(step, 1, 'execute', response.content, response.status, response.error, undefined, state.iteration);
 
     // Provider failures should abort immediately.
     if (response.status === 'error') {

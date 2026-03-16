@@ -29,7 +29,9 @@ Every behavior change requires a corresponding test, and every bug fix requires 
 |----------|--------|
 | High | Business logic, state transitions |
 | Medium | Edge cases, error handling |
-| Low | Simple CRUD, UI appearance |
+| Low | Simple CRUD |
+
+**Note:** When a design reference is provided, UI appearance verification is elevated to medium priority. Refer to the Design Fidelity Policy.
 
 ## Test Structure: Given-When-Then
 
@@ -64,6 +66,37 @@ Test names describe expected behavior. Use the `should {expected behavior} when 
 - Arrange-Act-Assert pattern (equivalent to Given-When-Then)
 - Avoid magic numbers and magic strings
 
+## Refetch loop regressions
+
+When a page performs initial loading, tests must prove that the load does not rerun because of unrelated re-renders, loading toggles, or Context callback identity changes.
+
+| Criteria | Verdict |
+|----------|---------|
+| Initial load bug fix has no regression test for duplicate API calls | REJECT |
+| Tests only verify that loading happened once, not that it stayed stable after rerender | Warning |
+| Page tests assert call count stability across rerender or state updates | OK |
+
+## Reachability regressions
+
+When adding or changing user-facing features or screens, tests or equivalent verification must prove that users can still reach the feature.
+
+| Criteria | Verdict |
+|----------|---------|
+| A new screen or feature is added with no verification of entry path or launch conditions | REJECT |
+| Only isolated component rendering is tested, without verifying reachability from an entry point | Warning |
+| The feature is verified reachable from an actual entry point such as a route, menu, button, link, or external caller | OK |
+
+## UI library integration regressions
+
+When introducing or changing major third-party UI components such as data grids, date pickers, virtualized lists, or charts, tests must prove that the real component mounts without crashing.
+
+| Criteria | Verdict |
+|----------|---------|
+| A major third-party UI component is added or changed without a regression test that mounts the real component | REJECT |
+| Prop compatibility is checked only through shallow mocks or existence checks | Warning |
+| The screen is rendered from its real entry path and the primary UI mounts without exceptions | OK |
+| The primary UI component is also rendered directly with representative props | OK |
+
 ## Test Strategy
 
 - Prefer unit tests for logic, integration tests for boundaries
@@ -80,6 +113,26 @@ Verify data flow coupling that unit tests alone cannot cover.
 | New status/state merging into an existing workflow | Integration test for the full transition flow required |
 | New option propagating through a call chain to the endpoint | End-to-end chain coupling test required |
 | All module-level unit tests pass | Unit tests alone are sufficient (when none of the above apply) |
+
+## Unit Test Criteria
+
+| Criteria | Verdict |
+|----------|---------|
+| Mocking the internal implementation of the test target (testing implementation, not behavior) | REJECT |
+| Sharing and mutating fixtures between tests | REJECT. Loss of test independence |
+| Mock return values diverging from actual types | Warning. Use type-safe mocks |
+| Only testing happy paths without boundary values | Warning |
+
+## E2E Test Criteria
+
+| Criteria | Verdict |
+|----------|---------|
+| Hitting production APIs without mocking external calls | REJECT. Test reproducibility is lost |
+| Mocking the core logic under test | REJECT. Defeats the purpose of E2E |
+| Using fixed sleep for timing synchronization | REJECT. Use state-based waits |
+| Sharing state between tests | Warning. Test independence is compromised |
+| Only testing happy paths without error flows | Warning |
+| Writing E2E tests for logic that unit tests can cover | Warning |
 
 ## Test Environment Isolation
 

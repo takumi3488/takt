@@ -3,10 +3,9 @@ import type { PieceMovement, PieceState, Language } from '../../models/types.js'
 import type { MovementProviderOptions } from '../../models/piece-types.js';
 import type { RunAgentOptions } from '../../../agents/runner.js';
 import type { PhaseRunnerContext } from '../phase-runner.js';
-import type { PieceEngineOptions, PhaseName, MovementProviderInfo } from '../types.js';
+import type { PieceEngineOptions, PhaseName, MovementProviderInfo, PhasePromptParts, JudgeStageEntry } from '../types.js';
 import { buildSessionKey } from '../session-key.js';
 import { resolveMovementProviderModel } from '../provider-resolution.js';
-import { DEFAULT_PROVIDER_PERMISSION_PROFILES, resolveMovementPermissionMode } from '../permission-profile-resolution.js';
 
 function mergeProviderOptions(
   ...layers: (MovementProviderOptions | undefined)[]
@@ -20,9 +19,12 @@ function mergeProviderOptions(
     if (layer.opencode) {
       result.opencode = { ...result.opencode, ...layer.opencode };
     }
-    if (layer.claude?.sandbox) {
+    if (layer.claude?.sandbox || layer.claude?.allowedTools) {
       result.claude = {
-        sandbox: { ...result.claude?.sandbox, ...layer.claude.sandbox },
+        sandbox: layer.claude.sandbox
+          ? { ...result.claude?.sandbox, ...layer.claude.sandbox }
+          : result.claude?.sandbox,
+        allowedTools: layer.claude.allowedTools ?? result.claude?.allowedTools,
       };
     }
   }
@@ -68,7 +70,7 @@ export class OptionsBuilder {
   }
 
   /** Build common RunAgentOptions shared by all phases */
-  buildBaseOptions(step: PieceMovement): RunAgentOptions {
+  buildBaseOptions(step: PieceMovement, mergedProviderOptions?: MovementProviderOptions): RunAgentOptions {
     const movements = this.getPieceMovements();
     const currentIndex = movements.findIndex((m) => m.name === step.name);
     const currentPosition = currentIndex >= 0 ? `${currentIndex + 1}/${movements.length}` : '?/?';
@@ -82,14 +84,12 @@ export class OptionsBuilder {
       model: this.engineOptions.model,
       stepProvider: resolvedProvider,
       stepModel: resolvedModel,
-      permissionMode: resolveMovementPermissionMode({
+      permissionResolution: {
         movementName: step.name,
         requiredPermissionMode: step.requiredPermissionMode,
-        provider: resolvedProvider,
-        projectProviderProfiles: this.engineOptions.providerProfiles,
-        globalProviderProfiles: DEFAULT_PROVIDER_PERMISSION_PROFILES,
-      }),
-      providerOptions: resolveMovementProviderOptions(
+        providerProfiles: this.engineOptions.providerProfiles,
+      },
+      providerOptions: mergedProviderOptions ?? resolveMovementProviderOptions(
         this.engineOptions.providerOptionsSource,
         this.engineOptions.providerOptions,
         step.providerOptions,
@@ -111,19 +111,26 @@ export class OptionsBuilder {
 
   /** Build RunAgentOptions for Phase 1 (main execution) */
   buildAgentOptions(step: PieceMovement): RunAgentOptions {
+    const mergedProviderOptions = resolveMovementProviderOptions(
+      this.engineOptions.providerOptionsSource,
+      this.engineOptions.providerOptions,
+      step.providerOptions,
+    );
+
     // Phase 1: exclude Write from allowedTools when movement has output contracts AND edit is NOT enabled
     // (If edit is enabled, Write is needed for code implementation even if output contracts exist)
     // Note: edit defaults to undefined, so check !== true to catch both false and undefined
     const hasOutputContracts = step.outputContracts && step.outputContracts.length > 0;
+    const resolvedAllowedTools = mergedProviderOptions?.claude?.allowedTools;
     const allowedTools = hasOutputContracts && step.edit !== true
-      ? step.allowedTools?.filter((t) => t !== 'Write')
-      : step.allowedTools;
+      ? resolvedAllowedTools?.filter((t) => t !== 'Write')
+      : resolvedAllowedTools;
 
     // Skip session resume when cwd !== projectCwd (worktree execution) to avoid cross-directory contamination
     const shouldResumeSession = step.session !== 'refresh' && this.getCwd() === this.getProjectCwd();
 
     return {
-      ...this.buildBaseOptions(step),
+      ...this.buildBaseOptions(step, mergedProviderOptions),
       sessionId: shouldResumeSession ? this.getSessionId(buildSessionKey(step)) : undefined,
       allowedTools,
       mcpServers: step.mcpServers,
@@ -164,8 +171,34 @@ export class OptionsBuilder {
     state: PieceState,
     lastResponse: string | undefined,
     updatePersonaSession: (persona: string, sessionId: string | undefined) => void,
-    onPhaseStart?: (step: PieceMovement, phase: 1 | 2 | 3, phaseName: PhaseName, instruction: string) => void,
-    onPhaseComplete?: (step: PieceMovement, phase: 1 | 2 | 3, phaseName: PhaseName, content: string, status: string, error?: string) => void,
+    onPhaseStart?: (
+      step: PieceMovement,
+      phase: 1 | 2 | 3,
+      phaseName: PhaseName,
+      instruction: string,
+      promptParts: PhasePromptParts,
+      phaseExecutionId?: string,
+      iteration?: number,
+    ) => void,
+    onPhaseComplete?: (
+      step: PieceMovement,
+      phase: 1 | 2 | 3,
+      phaseName: PhaseName,
+      content: string,
+      status: string,
+      error?: string,
+      phaseExecutionId?: string,
+      iteration?: number,
+    ) => void,
+    onJudgeStage?: (
+      step: PieceMovement,
+      phase: 3,
+      phaseName: 'judge',
+      entry: JudgeStageEntry,
+      phaseExecutionId?: string,
+      iteration?: number,
+    ) => void,
+    iteration?: number,
   ): PhaseRunnerContext {
     return {
       cwd: this.getCwd(),
@@ -180,6 +213,8 @@ export class OptionsBuilder {
       updatePersonaSession,
       onPhaseStart,
       onPhaseComplete,
+      onJudgeStage,
+      iteration,
     };
   }
 }

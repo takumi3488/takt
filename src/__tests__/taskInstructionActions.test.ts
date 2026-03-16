@@ -14,6 +14,11 @@ const {
   mockListRecentRuns,
   mockSelectRun,
   mockLoadRunSessionContext,
+  mockFindRunForTask,
+  mockFindPreviousOrderContent,
+  mockWarn,
+  mockIsPiecePath,
+  mockLoadAllPiecesWithSources,
 } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(() => true),
   mockStartReExecution: vi.fn(),
@@ -28,6 +33,14 @@ const {
   mockListRecentRuns: vi.fn(() => []),
   mockSelectRun: vi.fn(() => null),
   mockLoadRunSessionContext: vi.fn(),
+  mockFindRunForTask: vi.fn(() => null),
+  mockFindPreviousOrderContent: vi.fn(() => null),
+  mockWarn: vi.fn(),
+  mockIsPiecePath: vi.fn(() => false),
+  mockLoadAllPiecesWithSources: vi.fn(() => new Map<string, unknown>([
+    ['default', {}],
+    ['selected-piece', {}],
+  ])),
 }));
 
 vi.mock('node:fs', async (importOriginal) => ({
@@ -55,6 +68,8 @@ vi.mock('../infra/config/index.js', () => ({
     pieceStructure: [],
     movementPreviews: [],
   })),
+  isPiecePath: (...args: unknown[]) => mockIsPiecePath(...args),
+  loadAllPiecesWithSources: (...args: unknown[]) => mockLoadAllPiecesWithSources(...args),
 }));
 
 vi.mock('../features/tasks/list/instructMode.js', () => ({
@@ -82,8 +97,8 @@ vi.mock('../features/interactive/index.js', () => ({
   listRecentRuns: (...args: unknown[]) => mockListRecentRuns(...args),
   selectRun: (...args: unknown[]) => mockSelectRun(...args),
   loadRunSessionContext: (...args: unknown[]) => mockLoadRunSessionContext(...args),
-  findRunForTask: vi.fn(() => null),
-  findPreviousOrderContent: vi.fn(() => null),
+  findRunForTask: (...args: unknown[]) => mockFindRunForTask(...args),
+  findPreviousOrderContent: (...args: unknown[]) => mockFindPreviousOrderContent(...args),
 }));
 
 vi.mock('../features/tasks/execute/taskExecution.js', () => ({
@@ -93,6 +108,7 @@ vi.mock('../features/tasks/execute/taskExecution.js', () => ({
 vi.mock('../shared/ui/index.js', () => ({
   info: vi.fn(),
   error: vi.fn(),
+  warn: mockWarn,
 }));
 
 vi.mock('../shared/utils/index.js', async (importOriginal) => ({
@@ -118,10 +134,25 @@ describe('instructBranch direct execution flow', () => {
     mockRunInstructMode.mockResolvedValue({ action: 'execute', task: '追加指示A' });
     mockDispatchConversationAction.mockImplementation(async (_result, handlers) => handlers.execute({ task: '追加指示A' }));
     mockConfirm.mockResolvedValue(true);
-    mockGetLabel.mockReturnValue("Reference a previous run's results?");
+    mockGetLabel.mockImplementation((key: string, _lang?: string, vars?: Record<string, string>) => {
+      if (key === 'interactive.runSelector.confirm') {
+        return "Reference a previous run's results?";
+      }
+      if (vars?.piece) {
+        return `Use previous piece "${vars.piece}"?`;
+      }
+      return key;
+    });
     mockResolveLanguage.mockReturnValue('en');
     mockListRecentRuns.mockReturnValue([]);
     mockSelectRun.mockResolvedValue(null);
+    mockFindRunForTask.mockReturnValue(null);
+    mockFindPreviousOrderContent.mockReturnValue(null);
+    mockIsPiecePath.mockImplementation((piece: string) => piece.startsWith('/') || piece.startsWith('~') || piece.startsWith('./') || piece.startsWith('../') || piece.endsWith('.yaml') || piece.endsWith('.yml'));
+    mockLoadAllPiecesWithSources.mockReturnValue(new Map<string, unknown>([
+      ['default', {}],
+      ['selected-piece', {}],
+    ]));
     mockStartReExecution.mockReturnValue({
       name: 'done-task',
       content: 'done',
@@ -150,6 +181,111 @@ describe('instructBranch direct execution flow', () => {
       '既存ノート\n\n追加指示A',
     );
     expect(mockExecuteAndCompleteTask).toHaveBeenCalled();
+  });
+
+  it('should execute with selected piece without mutating taskInfo', async () => {
+    mockSelectPiece.mockResolvedValue('selected-piece');
+    const originalTaskInfo = {
+      name: 'done-task',
+      content: 'done',
+      data: { task: 'done', piece: 'original-piece' },
+    };
+    mockStartReExecution.mockReturnValue(originalTaskInfo);
+
+    await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done' },
+    });
+
+    const executeArg = mockExecuteAndCompleteTask.mock.calls[0]?.[0];
+    expect(executeArg).not.toBe(originalTaskInfo);
+    expect(executeArg.data).not.toBe(originalTaskInfo.data);
+    expect(executeArg.data.piece).toBe('selected-piece');
+    expect(originalTaskInfo.data.piece).toBe('original-piece');
+  });
+
+  it('should reuse previous piece from task data when confirmed', async () => {
+    mockConfirm
+      .mockResolvedValueOnce(true);
+
+    await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done', piece: 'default' },
+    });
+
+    expect(mockSelectPiece).not.toHaveBeenCalled();
+    const [message, defaultYes] = mockConfirm.mock.calls[0] ?? [];
+    expect(message).toEqual(expect.stringContaining('"default"'));
+    expect(defaultYes ?? true).toBe(true);
+  });
+
+  it('should call selectPiece when previous piece reuse is declined', async () => {
+    mockConfirm
+      .mockResolvedValueOnce(false);
+    mockSelectPiece.mockResolvedValue('selected-piece');
+
+    await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done', piece: 'default' },
+    });
+
+    expect(mockSelectPiece).toHaveBeenCalledWith('/project');
+    expect(mockStartReExecution).toHaveBeenCalled();
+  });
+
+  it('should skip reuse prompt when task data has no piece', async () => {
+    mockSelectPiece.mockResolvedValue('selected-piece');
+
+    await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done' },
+    });
+
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(mockSelectPiece).toHaveBeenCalledWith('/project');
+  });
+
+  it('should return false when replacement piece selection is cancelled after declining reuse', async () => {
+    mockConfirm.mockResolvedValueOnce(false);
+    mockSelectPiece.mockResolvedValue(null);
+
+    const result = await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done', piece: 'default' },
+    });
+
+    expect(result).toBe(false);
+    expect(mockStartReExecution).not.toHaveBeenCalled();
   });
 
   it('should set generated instruction as retry note when no existing note', async () => {
@@ -232,6 +368,94 @@ describe('instructBranch direct execution flow', () => {
       runContext,
       null,
     );
+  });
+
+  it('should show deprecated config warning when selected run order uses legacy provider fields', async () => {
+    mockListRecentRuns.mockReturnValue([
+      { slug: 'run-1', task: 'fix', piece: 'default', status: 'completed', startTime: '2026-02-18T00:00:00Z' },
+    ]);
+    mockSelectRun.mockResolvedValue('run-1');
+    mockLoadRunSessionContext.mockReturnValue({
+      task: 'fix',
+      piece: 'default',
+      status: 'completed',
+      movementLogs: [],
+      reports: [],
+    });
+    mockFindPreviousOrderContent.mockReturnValue([
+      'movements:',
+      '  - name: review',
+      '    provider: codex',
+      '    model: gpt-5.3',
+      '    provider_options:',
+      '      codex:',
+      '        network_access: true',
+    ].join('\n'));
+
+    await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done' },
+    });
+
+    expect(mockWarn).toHaveBeenCalledTimes(1);
+    expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining('deprecated'));
+  });
+
+  it('should not warn for markdown explanatory snippets without piece config body', async () => {
+    mockFindPreviousOrderContent.mockReturnValue([
+      '# Deprecated examples',
+      '',
+      '```yaml',
+      'provider: codex',
+      'model: gpt-5.3',
+      'provider_options:',
+      '  codex:',
+      '    network_access: true',
+      '```',
+    ].join('\n'));
+
+    await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done' },
+    });
+
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it('should not warn when selected run order uses provider block format', async () => {
+    mockFindPreviousOrderContent.mockReturnValue([
+      'movements:',
+      '  - name: review',
+      '    provider:',
+      '      type: codex',
+      '      model: gpt-5.3',
+      '      network_access: true',
+    ].join('\n'));
+
+    await instructBranch('/project', {
+      kind: 'completed',
+      name: 'done-task',
+      createdAt: '2026-02-14T00:00:00.000Z',
+      filePath: '/project/.takt/tasks.yaml',
+      content: 'done',
+      branch: 'takt/done-task',
+      worktreePath: '/project/.takt/worktrees/done-task',
+      data: { task: 'done' },
+    });
+
+    expect(mockWarn).not.toHaveBeenCalled();
   });
 
   it('should return false when worktree does not exist', async () => {

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TaskFileSchema, type TaskFileData, type TaskRecord } from './schema.js';
+import { buildTaskInstruction } from './instruction.js';
 import { firstLine } from './naming.js';
 import type { TaskInfo, TaskListItem } from './types.js';
 
@@ -10,17 +11,6 @@ function toDisplayPath(projectDir: string, targetPath: string): string {
     return targetPath;
   }
   return relativePath;
-}
-
-function buildTaskDirInstruction(projectDir: string, taskDirPath: string, orderFilePath: string): string {
-  const displayTaskDir = toDisplayPath(projectDir, taskDirPath);
-  const displayOrderFile = toDisplayPath(projectDir, orderFilePath);
-  return [
-    `Implement using only the files in \`${displayTaskDir}\`.`,
-    `Primary spec: \`${displayOrderFile}\`.`,
-    'Use report files in Report Directory as primary execution history.',
-    'Do not rely on previous response or conversation summary.',
-  ].join('\n');
 }
 
 export function resolveTaskContent(projectDir: string, task: TaskRecord): string {
@@ -33,7 +23,10 @@ export function resolveTaskContent(projectDir: string, task: TaskRecord): string
     if (!fs.existsSync(orderFilePath)) {
       throw new Error(`Task spec file is missing: ${orderFilePath}`);
     }
-    return buildTaskDirInstruction(projectDir, taskDirPath, orderFilePath);
+    return buildTaskInstruction(
+      toDisplayPath(projectDir, taskDirPath),
+      toDisplayPath(projectDir, orderFilePath),
+    );
   }
   if (!task.content_file) {
     throw new Error(`Task content is missing: ${task.name}`);
@@ -50,6 +43,7 @@ function buildTaskFileData(task: TaskRecord, content: string): TaskFileData {
     task: content,
     worktree: task.worktree,
     branch: task.branch,
+    base_branch: task.base_branch,
     piece: task.piece,
     issue: task.issue,
     start_movement: task.start_movement,
@@ -90,6 +84,14 @@ export function toPendingTaskItem(projectDir: string, tasksFile: string, task: T
 export function toFailedTaskItem(projectDir: string, tasksFile: string, task: TaskRecord): TaskListItem {
   return {
     kind: 'failed',
+    ...toBaseTaskListItem(projectDir, tasksFile, task),
+    failure: task.failure,
+  };
+}
+
+export function toPrFailedTaskItem(projectDir: string, tasksFile: string, task: TaskRecord): TaskListItem {
+  return {
+    kind: 'pr_failed',
     ...toBaseTaskListItem(projectDir, tasksFile, task),
     failure: task.failure,
   };
@@ -148,5 +150,7 @@ export function toTaskListItem(projectDir: string, tasksFile: string, task: Task
       return toFailedTaskItem(projectDir, tasksFile, task);
     case 'exceeded':
       return toExceededTaskItem(projectDir, tasksFile, task);
+    case 'pr_failed':
+      return toPrFailedTaskItem(projectDir, tasksFile, task);
   }
 }

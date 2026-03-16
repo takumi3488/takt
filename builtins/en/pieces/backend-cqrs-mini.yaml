@@ -8,6 +8,19 @@ piece_config:
       network_access: true
 max_movements: 20
 initial_movement: plan
+loop_monitors:
+  - cycle:
+      - reviewers
+      - fix_both
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: converging (findings decreasing, fixes applied)
+          next: fix_both
+        - condition: unproductive (same findings repeating)
+          next: supervise_fix
 movements:
   - name: plan
     edit: false
@@ -17,13 +30,15 @@ movements:
       - cqrs-es
       - security
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Bash
+          - WebSearch
+          - WebFetch
     rules:
       - condition: Requirements are clear and implementation is possible
         next: implement
@@ -47,15 +62,17 @@ movements:
       - cqrs-es
       - security
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
     instruction: implement
     rules:
@@ -81,12 +98,14 @@ movements:
         policy:
           - review
           - ai-antipattern
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - WebSearch
+              - WebFetch
         instruction: review-ai
         rules:
           - condition: No AI-specific issues
@@ -104,13 +123,15 @@ movements:
           - cqrs-es
           - security
           - architecture
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         instruction: supervise
         rules:
           - condition: All checks passed
@@ -144,14 +165,16 @@ movements:
           - cqrs-es
           - security
           - architecture
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Edit
+              - Bash
+              - WebSearch
+              - WebFetch
         required_permission_mode: edit
         rules:
           - condition: AI Reviewer's issues fixed
@@ -169,14 +192,16 @@ movements:
           - cqrs-es
           - security
           - architecture
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Edit
+              - Bash
+              - WebSearch
+              - WebFetch
         required_permission_mode: edit
         rules:
           - condition: Supervisor's issues fixed
@@ -198,15 +223,17 @@ movements:
       - cqrs-es
       - security
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
     pass_previous_response: false
     rules:
@@ -228,15 +255,17 @@ movements:
       - cqrs-es
       - security
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
     pass_previous_response: false
     rules:

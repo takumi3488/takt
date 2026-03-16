@@ -12,7 +12,8 @@ Configure TAKT defaults in `~/.takt/config.yaml`. This file is created automatic
 # ~/.takt/config.yaml
 language: en                  # UI language: 'en' or 'ja'
 default_piece: default        # Default piece for new projects
-log_level: info               # Log level: debug, info, warn, error
+logging:
+  level: info                 # Log level: debug, info, warn, error
 provider: claude              # Default provider: claude, codex, opencode, cursor, or copilot
 model: sonnet                 # Default model (optional, passed to provider as-is)
 branch_name_strategy: romaji  # Branch name generation: 'romaji' (fast) or 'ai' (slow)
@@ -92,7 +93,7 @@ interactive_preview_movements: 3  # Movement previews in interactive mode (0-10,
 |-------|------|---------|-------------|
 | `language` | `"en"` \| `"ja"` | `"en"` | UI language |
 | `default_piece` | string | `"default"` | Default piece for new projects |
-| `log_level` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` | `"info"` | Log level |
+| `logging.level` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` | `"info"` | Log level |
 | `provider` | `"claude"` \| `"codex"` \| `"opencode"` \| `"cursor"` \| `"copilot"` | `"claude"` | Default AI provider |
 | `model` | string | - | Default model name (passed to provider as-is) |
 | `branch_name_strategy` | `"romaji"` \| `"ai"` | `"romaji"` | Branch name generation strategy |
@@ -103,6 +104,8 @@ interactive_preview_movements: 3  # Movement previews in interactive mode (0-10,
 | `task_poll_interval_ms` | number (100-5000) | `500` | Polling interval for new tasks |
 | `interactive_preview_movements` | number (0-10) | `3` | Movement previews in interactive mode |
 | `worktree_dir` | string | - | Directory for shared clones (defaults to `../{clone-name}`) |
+| `allow_git_hooks` | boolean | `false` | Allow git hooks during TAKT-managed auto-commit |
+| `allow_git_filters` | boolean | `false` | Allow git filters during TAKT-managed auto-commit |
 | `auto_pr` | boolean | - | Auto-create PR after worktree execution |
 | `verbose` | boolean | - | Verbose output mode |
 | `minimal_output` | boolean | `false` | Suppress AI output (for CI) |
@@ -160,6 +163,8 @@ concurrency: 2                # Parallel task count for takt run in this project
 | `piece` | string | `"default"` | Current piece name for this project |
 | `provider` | `"claude"` \| `"codex"` \| `"opencode"` \| `"cursor"` \| `"copilot"` \| `"mock"` | - | Override provider |
 | `model` | string | - | Override model name (passed to provider as-is) |
+| `allow_git_hooks` | boolean | `false` | Allow git hooks during TAKT-managed auto-commit |
+| `allow_git_filters` | boolean | `false` | Allow git filters during TAKT-managed auto-commit |
 | `auto_pr` | boolean | - | Auto-create PR after worktree execution |
 | `verbose` | boolean | - | Verbose output mode |
 | `concurrency` | number (1-10) | `1` (from global) | Parallel task count for `takt run` |
@@ -434,22 +439,28 @@ pipeline:
 
 ### Debug Logging
 
-Enable debug logging by setting `debug_enabled: true` in `~/.takt/config.yaml` or by creating a `.takt/debug.yaml` file:
+Enable debug logging by setting `logging.debug: true` in `~/.takt/config.yaml`:
 
 ```yaml
-# .takt/debug.yaml
-enabled: true
+logging:
+  debug: true
 ```
 
-Debug logs are written to `.takt/logs/debug.log` in NDJSON format.
+Debug logs are written to `.takt/runs/debug-{timestamp}/logs/debug.log` in NDJSON format.
 
 ### Verbose Mode
 
-Create an empty `.takt/verbose` file to enable verbose console output. This automatically enables debug logging.
-
-Alternatively, set `verbose: true` in your config:
+Set `verbose: true` in your config:
 
 ```yaml
 # ~/.takt/config.yaml or .takt/config.yaml
 verbose: true
 ```
+
+You can also force verbose output via environment variable:
+
+```yaml
+TAKT_VERBOSE=true
+```
+
+This also enables `logging.debug`, `logging.trace`, and sets `logging.level` to `debug`.

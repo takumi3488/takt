@@ -1,10 +1,3 @@
-/**
- * Tests for github/pr module
- *
- * Tests buildPrBody formatting and findExistingPr logic.
- * createPullRequest/commentOnPr call `gh` CLI, not unit-tested here.
- */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockExecFileSync = vi.fn();
@@ -183,13 +176,14 @@ describe('fetchPrReviewComments', () => {
     vi.clearAllMocks();
   });
 
-  it('should parse gh pr view JSON and return PrReviewData', () => {
+  it('should return PrReviewData when gh pr view JSON is valid', () => {
     // Given
     const ghResponse = {
       number: 456,
       title: 'Fix auth bug',
       body: 'PR description',
       url: 'https://github.com/org/repo/pull/456',
+      baseRefName: 'release/main',
       headRefName: 'fix/auth-bug',
       comments: [
         { author: { login: 'commenter1' }, body: 'Please update tests' },
@@ -198,14 +192,10 @@ describe('fetchPrReviewComments', () => {
         {
           author: { login: 'reviewer1' },
           body: 'Looks mostly good',
-          comments: [
-            { body: 'Fix null check here', path: 'src/auth.ts', line: 42, author: { login: 'reviewer1' } },
-          ],
         },
         {
           author: { login: 'reviewer2' },
           body: '',
-          comments: [],
         },
       ],
       files: [
@@ -213,7 +203,12 @@ describe('fetchPrReviewComments', () => {
         { path: 'src/auth.test.ts' },
       ],
     };
-    mockExecFileSync.mockReturnValue(JSON.stringify(ghResponse));
+    const inlineCommentsResponse = [
+      { body: 'Fix null check here', path: 'src/auth.ts', line: 42, user: { login: 'reviewer1' } },
+    ];
+    mockExecFileSync
+      .mockReturnValueOnce(JSON.stringify(ghResponse))
+      .mockReturnValueOnce(JSON.stringify(inlineCommentsResponse));
 
     // When
     const result = fetchPrReviewComments(456);
@@ -221,11 +216,17 @@ describe('fetchPrReviewComments', () => {
     // Then
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'view', '456', '--json', 'number,title,body,url,headRefName,comments,reviews,files'],
+      ['pr', 'view', '456', '--json', 'number,title,body,url,headRefName,baseRefName,comments,reviews,files'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      ['api', '/repos/org/repo/pulls/456/comments?per_page=100&page=1'],
       expect.objectContaining({ encoding: 'utf-8' }),
     );
     expect(result.number).toBe(456);
     expect(result.title).toBe('Fix auth bug');
+    expect((result as { baseRefName?: string }).baseRefName).toBe('release/main');
     expect(result.headRefName).toBe('fix/auth-bug');
     expect(result.comments).toEqual([{ author: 'commenter1', body: 'Please update tests' }]);
     expect(result.reviews).toEqual([
@@ -245,17 +246,183 @@ describe('fetchPrReviewComments', () => {
       headRefName: 'feat/approved',
       comments: [],
       reviews: [
-        { author: { login: 'approver' }, body: '', comments: [] },
+        { author: { login: 'approver' }, body: '' },
       ],
       files: [],
     };
-    mockExecFileSync.mockReturnValue(JSON.stringify(ghResponse));
+    mockExecFileSync
+      .mockReturnValueOnce(JSON.stringify(ghResponse))
+      .mockReturnValueOnce(JSON.stringify([]));
 
     // When
     const result = fetchPrReviewComments(10);
 
     // Then
     expect(result.reviews).toEqual([]);
+  });
+
+  it('should include inline comments from pulls comments API even when review bodies are empty', () => {
+    // Given
+    const ghResponse = {
+      number: 11,
+      title: 'Inline only',
+      body: '',
+      url: 'https://github.com/org/repo/pull/11',
+      headRefName: 'fix/inline-only',
+      comments: [],
+      reviews: [
+        { author: { login: 'approver' }, body: '' },
+      ],
+      files: [],
+    };
+    const inlineCommentsResponse = [
+      { body: 'Address this edge case', path: 'src/index.ts', line: 7, user: { login: 'reviewer3' } },
+    ];
+    mockExecFileSync
+      .mockReturnValueOnce(JSON.stringify(ghResponse))
+      .mockReturnValueOnce(JSON.stringify(inlineCommentsResponse));
+
+    // When
+    const result = fetchPrReviewComments(11);
+
+    // Then
+    expect(result.reviews).toEqual([
+      { author: 'reviewer3', body: 'Address this edge case', path: 'src/index.ts', line: 7 },
+    ]);
+  });
+
+  it('should fetch all inline review comments when total comments exceed one default page', () => {
+    // Given
+    const ghResponse = {
+      number: 12,
+      title: 'Many inline comments',
+      body: '',
+      url: 'https://github.com/org/repo/pull/12',
+      headRefName: 'fix/many-inline-comments',
+      comments: [],
+      reviews: [],
+      files: [],
+    };
+    const inlineCommentsResponse = Array.from({ length: 31 }, (_, i) => ({
+      body: `Inline comment ${i + 1}`,
+      path: 'src/index.ts',
+      line: i + 1,
+      user: { login: 'reviewer-pagination' },
+    }));
+    mockExecFileSync
+      .mockReturnValueOnce(JSON.stringify(ghResponse))
+      .mockReturnValueOnce(JSON.stringify(inlineCommentsResponse));
+
+    // When
+    const result = fetchPrReviewComments(12);
+
+    // Then
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      ['api', '/repos/org/repo/pulls/12/comments?per_page=100&page=1'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+    expect(result.reviews).toHaveLength(31);
+    expect(result.reviews[0]).toEqual({
+      author: 'reviewer-pagination',
+      body: 'Inline comment 1',
+      path: 'src/index.ts',
+      line: 1,
+    });
+    expect(result.reviews[30]).toEqual({
+      author: 'reviewer-pagination',
+      body: 'Inline comment 31',
+      path: 'src/index.ts',
+      line: 31,
+    });
+  });
+
+  it('should request additional pages when inline review comments exceed per_page', () => {
+    // Given
+    const ghResponse = {
+      number: 13,
+      title: 'Paginated inline comments',
+      body: '',
+      url: 'https://github.com/org/repo/pull/13',
+      headRefName: 'fix/paginated-inline-comments',
+      comments: [],
+      reviews: [],
+      files: [],
+    };
+    const firstPageInlineComments = Array.from({ length: 100 }, (_, i) => ({
+      body: `Inline comment ${i + 1}`,
+      path: 'src/index.ts',
+      line: i + 1,
+      user: { login: 'reviewer-pagination' },
+    }));
+    const secondPageInlineComments = [
+      { body: 'Inline comment 101', path: 'src/index.ts', line: 101, user: { login: 'reviewer-pagination' } },
+    ];
+    mockExecFileSync
+      .mockReturnValueOnce(JSON.stringify(ghResponse))
+      .mockReturnValueOnce(JSON.stringify(firstPageInlineComments))
+      .mockReturnValueOnce(JSON.stringify(secondPageInlineComments));
+
+    // When
+    const result = fetchPrReviewComments(13);
+
+    // Then
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      ['api', '/repos/org/repo/pulls/13/comments?per_page=100&page=1'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'gh',
+      ['api', '/repos/org/repo/pulls/13/comments?per_page=100&page=2'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+    expect(result.reviews).toHaveLength(101);
+    expect(result.reviews[100]).toEqual({
+      author: 'reviewer-pagination',
+      body: 'Inline comment 101',
+      path: 'src/index.ts',
+      line: 101,
+    });
+  });
+
+  it('should fallback to original_line when line is null', () => {
+    // Given
+    const ghResponse = {
+      number: 14,
+      title: 'Keep original line',
+      body: '',
+      url: 'https://github.com/org/repo/pull/14',
+      headRefName: 'fix/original-line',
+      comments: [],
+      reviews: [],
+      files: [],
+    };
+    const inlineCommentsResponse = [
+      {
+        body: 'Line moved after suggestion',
+        path: 'src/index.ts',
+        line: null,
+        original_line: 27,
+        user: { login: 'reviewer-original-line' },
+      },
+    ];
+    mockExecFileSync
+      .mockReturnValueOnce(JSON.stringify(ghResponse))
+      .mockReturnValueOnce(JSON.stringify(inlineCommentsResponse));
+
+    // When
+    const result = fetchPrReviewComments(14);
+
+    // Then
+    expect(result.reviews).toEqual([
+      {
+        author: 'reviewer-original-line',
+        body: 'Line moved after suggestion',
+        path: 'src/index.ts',
+        line: 27,
+      },
+    ]);
   });
 
   it('should throw when gh CLI fails', () => {

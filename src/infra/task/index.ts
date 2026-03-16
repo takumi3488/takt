@@ -45,6 +45,8 @@ export {
   removeCloneMeta,
   cleanupOrphanedClone,
   resolveBaseBranch,
+  resolveCloneBaseDir,
+  branchExists,
 } from './clone.js';
 export {
   detectDefaultBranch,
@@ -56,6 +58,7 @@ export {
   buildListItems,
 } from './branchList.js';
 export { stageAndCommit, getCurrentBranch, pushBranch, checkoutBranch } from './git.js';
+export { buildTaskInstruction } from './instruction.js';
 export { autoCommitAndPush, type AutoCommitResult } from './autoCommit.js';
 export { summarizeTaskName } from './summarize.js';
 export { TaskWatcher, type TaskWatcherOptions } from './watcher.js';

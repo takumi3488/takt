@@ -11,12 +11,13 @@ vi.mock('../agents/runner.js', () => ({
 }));
 
 import { runAgent } from '../agents/runner.js';
+import type { AgentResponse } from '../core/models/types.js';
 
 function createStep(fileName: string): PieceMovement {
   return {
     name: 'reviewers',
     personaDisplayName: 'Reviewers',
-    instructionTemplate: 'review',
+    instruction: 'review',
     passPreviousResponse: false,
     outputContracts: [{ name: fileName }],
   };
@@ -51,6 +52,19 @@ function createContext(
   };
 }
 
+function queueRunAgentResponses(responses: AgentResponse[]): void {
+  const runAgentMock = vi.mocked(runAgent);
+  for (const response of responses) {
+    runAgentMock.mockImplementationOnce(async (persona, task, options) => {
+      options?.onPromptResolved?.({
+        systemPrompt: typeof persona === 'string' ? persona : '',
+        userInstruction: task,
+      });
+      return response;
+    });
+  }
+}
+
 describe('runReportPhase report history behavior', () => {
   let tmpRoot: string;
 
@@ -66,27 +80,27 @@ describe('runReportPhase report history behavior', () => {
     }
   });
 
-  it('should overwrite report file and archive previous content to reports-history', async () => {
+  it('should overwrite report file and save versioned copy in the same report directory', async () => {
     // Given
     const reportDir = join(tmpRoot, '.takt', 'runs', 'sample-run', 'reports');
     const step = createStep('05-architect-review.md');
     const ctx = createContext(reportDir);
-    const runAgentMock = vi.mocked(runAgent);
-    runAgentMock
-      .mockResolvedValueOnce({
+    queueRunAgentResponses([
+      {
         persona: 'reviewers',
         status: 'done',
         content: 'First review result',
         timestamp: new Date('2026-02-10T06:11:43Z'),
         sessionId: 'session-2',
-      })
-      .mockResolvedValueOnce({
+      },
+      {
         persona: 'reviewers',
         status: 'done',
         content: 'Second review result',
         timestamp: new Date('2026-02-10T06:14:37Z'),
         sessionId: 'session-3',
-      });
+      },
+    ]);
 
     // When
     await runReportPhase(step, 1, ctx);
@@ -97,12 +111,11 @@ describe('runReportPhase report history behavior', () => {
     const latestContent = readFileSync(latestPath, 'utf-8');
     expect(latestContent).toBe('Second review result');
 
-    const historyDir = join(tmpRoot, '.takt', 'runs', 'sample-run', 'logs', 'reports-history');
-    const historyFiles = readdirSync(historyDir);
-    expect(historyFiles).toHaveLength(1);
-    expect(historyFiles[0]).toMatch(/^05-architect-review\.\d{8}T\d{6}Z\.md$/);
+    const versionedFiles = readdirSync(reportDir).filter(f => f !== '05-architect-review.md');
+    expect(versionedFiles).toHaveLength(1);
+    expect(versionedFiles[0]).toMatch(/^05-architect-review\.md\.\d{8}T\d{6}Z$/);
 
-    const archivedContent = readFileSync(join(historyDir, historyFiles[0]!), 'utf-8');
+    const archivedContent = readFileSync(join(reportDir, versionedFiles[0]!), 'utf-8');
     expect(archivedContent).toBe('First review result');
   });
 
@@ -114,29 +127,29 @@ describe('runReportPhase report history behavior', () => {
     const reportDir = join(tmpRoot, '.takt', 'runs', 'sample-run', 'reports');
     const step = createStep('06-qa-review.md');
     const ctx = createContext(reportDir);
-    const runAgentMock = vi.mocked(runAgent);
-    runAgentMock
-      .mockResolvedValueOnce({
+    queueRunAgentResponses([
+      {
         persona: 'reviewers',
         status: 'done',
         content: 'v1',
         timestamp: new Date('2026-02-10T06:11:43Z'),
         sessionId: 'session-2',
-      })
-      .mockResolvedValueOnce({
+      },
+      {
         persona: 'reviewers',
         status: 'done',
         content: 'v2',
         timestamp: new Date('2026-02-10T06:11:43Z'),
         sessionId: 'session-3',
-      })
-      .mockResolvedValueOnce({
+      },
+      {
         persona: 'reviewers',
         status: 'done',
         content: 'v3',
         timestamp: new Date('2026-02-10T06:11:43Z'),
         sessionId: 'session-4',
-      });
+      },
+    ]);
 
     // When
     await runReportPhase(step, 1, ctx);
@@ -144,11 +157,10 @@ describe('runReportPhase report history behavior', () => {
     await runReportPhase(step, 3, ctx);
 
     // Then
-    const historyDir = join(tmpRoot, '.takt', 'runs', 'sample-run', 'logs', 'reports-history');
-    const historyFiles = readdirSync(historyDir).sort();
-    expect(historyFiles).toEqual([
-      '06-qa-review.20260210T061143Z.1.md',
-      '06-qa-review.20260210T061143Z.md',
+    const versionedFiles = readdirSync(reportDir).filter(f => f !== '06-qa-review.md').sort();
+    expect(versionedFiles).toEqual([
+      '06-qa-review.md.20260210T061143Z',
+      '06-qa-review.md.20260210T061143Z.1',
     ]);
   });
 
@@ -160,14 +172,13 @@ describe('runReportPhase report history behavior', () => {
     const ctx = createContext(reportDir, (overrides) => {
       capturedOverrides.push(overrides);
     });
-    const runAgentMock = vi.mocked(runAgent);
-    runAgentMock.mockResolvedValueOnce({
+    queueRunAgentResponses([{
       persona: 'reviewers',
       status: 'done',
       content: 'Permission-based report execution',
       timestamp: new Date('2026-02-10T06:21:17Z'),
       sessionId: 'session-2',
-    });
+    }]);
 
     // When
     await runReportPhase(step, 1, ctx);

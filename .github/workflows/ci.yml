@@ -5,8 +5,12 @@ on:
     branches: [main]
     types: [opened, synchronize, ready_for_review]
   push:
-    branches: [main, "takt/**"]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   lint:

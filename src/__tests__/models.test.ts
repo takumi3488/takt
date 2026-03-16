@@ -8,10 +8,13 @@ import {
   StatusSchema,
   PermissionModeSchema,
   PieceConfigRawSchema,
+  PieceMovementRawSchema,
   McpServerConfigSchema,
   CustomAgentConfigSchema,
   GlobalConfigSchema,
+  ProjectConfigSchema,
 } from '../core/models/index.js';
+import { STATUS_VALUES } from '../core/models/status.js';
 
 describe('AgentTypeSchema', () => {
   it('should accept valid agent types', () => {
@@ -28,18 +31,25 @@ describe('AgentTypeSchema', () => {
 
 describe('StatusSchema', () => {
   it('should accept valid statuses', () => {
-    expect(StatusSchema.parse('pending')).toBe('pending');
     expect(StatusSchema.parse('done')).toBe('done');
-    expect(StatusSchema.parse('approved')).toBe('approved');
-    expect(StatusSchema.parse('rejected')).toBe('rejected');
     expect(StatusSchema.parse('blocked')).toBe('blocked');
     expect(StatusSchema.parse('error')).toBe('error');
-    expect(StatusSchema.parse('answer')).toBe('answer');
+  });
+
+  it('should align with the shared status contract values', () => {
+    expect(StatusSchema.options).toEqual([...STATUS_VALUES]);
   });
 
   it('should reject invalid statuses', () => {
     expect(() => StatusSchema.parse('unknown')).toThrow();
     expect(() => StatusSchema.parse('conditional')).toThrow();
+    expect(() => StatusSchema.parse('pending')).toThrow();
+    expect(() => StatusSchema.parse('approved')).toThrow();
+    expect(() => StatusSchema.parse('rejected')).toThrow();
+    expect(() => StatusSchema.parse('improve')).toThrow();
+    expect(() => StatusSchema.parse('cancelled')).toThrow();
+    expect(() => StatusSchema.parse('interrupted')).toThrow();
+    expect(() => StatusSchema.parse('answer')).toThrow();
   });
 });
 
@@ -68,7 +78,11 @@ describe('PieceConfigRawSchema', () => {
         {
           name: 'step1',
           persona: 'coder',
-          allowed_tools: ['Read', 'Grep'],
+          provider_options: {
+            claude: {
+              allowed_tools: ['Read', 'Grep'],
+            },
+          },
           instruction: '{task}',
           rules: [
             { condition: 'Task completed', next: 'COMPLETE' },
@@ -80,7 +94,11 @@ describe('PieceConfigRawSchema', () => {
     const result = PieceConfigRawSchema.parse(config);
     expect(result.name).toBe('test-piece');
     expect(result.movements).toHaveLength(1);
-    expect(result.movements![0]?.allowed_tools).toEqual(['Read', 'Grep']);
+    expect(result.movements![0]?.provider_options).toEqual({
+      claude: {
+        allowed_tools: ['Read', 'Grep'],
+      },
+    });
     expect(result.max_movements).toBe(10);
   });
 
@@ -91,7 +109,11 @@ describe('PieceConfigRawSchema', () => {
         {
           name: 'implement',
           persona: 'coder',
-          allowed_tools: ['Read', 'Edit', 'Write', 'Bash'],
+          provider_options: {
+            claude: {
+              allowed_tools: ['Read', 'Edit', 'Write', 'Bash'],
+            },
+          },
           required_permission_mode: 'edit',
           instruction: '{task}',
           rules: [
@@ -126,6 +148,114 @@ describe('PieceConfigRawSchema', () => {
       codex: { network_access: true },
       opencode: { network_access: false },
     });
+  });
+
+  it('should parse movement with provider object block', () => {
+    const config = {
+      name: 'test-piece',
+      movements: [
+        {
+          name: 'implement',
+          provider: {
+            type: 'codex',
+            model: 'gpt-5.3',
+            network_access: true,
+          },
+          instruction: '{task}',
+        },
+      ],
+    };
+
+    const result = PieceConfigRawSchema.parse(config as unknown);
+    const movement = result.movements?.[0] as Record<string, unknown> | undefined;
+    const provider = movement?.provider as Record<string, unknown> | undefined;
+    expect(provider?.type).toBe('codex');
+    expect(provider?.model).toBe('gpt-5.3');
+    expect(provider?.network_access).toBe(true);
+  });
+
+  it('should reject provider block when claude sets network_access', () => {
+    const config = {
+      name: 'test-piece',
+      movements: [
+        {
+          name: 'implement',
+          provider: {
+            type: 'claude',
+            network_access: true,
+          },
+          instruction: '{task}',
+        },
+      ],
+    };
+
+    expect(() => PieceConfigRawSchema.parse(config as unknown)).toThrow(/network_access/);
+  });
+
+  it('should reject provider block when codex sets sandbox', () => {
+    const config = {
+      name: 'test-piece',
+      movements: [
+        {
+          name: 'implement',
+          provider: {
+            type: 'codex',
+            sandbox: {
+              allow_unsandboxed_commands: true,
+            },
+          },
+          instruction: '{task}',
+        },
+      ],
+    };
+
+    expect(() => PieceConfigRawSchema.parse(config as unknown)).toThrow(/sandbox/);
+  });
+
+  it('should reject provider block with unknown fields', () => {
+    const config = {
+      name: 'test-piece',
+      movements: [
+        {
+          name: 'implement',
+          provider: {
+            type: 'codex',
+            model: 'gpt-5.3',
+            network_access: true,
+            unknown_option: true,
+          },
+          instruction: '{task}',
+        },
+      ],
+    };
+
+    expect(() => PieceConfigRawSchema.parse(config as unknown)).toThrow();
+  });
+
+  it('should parse piece-level piece_config.provider block', () => {
+    const config = {
+      name: 'test-piece',
+      piece_config: {
+        provider: {
+          type: 'codex',
+          model: 'gpt-5.3',
+          network_access: true,
+        },
+      },
+      movements: [
+        {
+          name: 'implement',
+          instruction: '{task}',
+        },
+      ],
+    };
+
+    const result = PieceConfigRawSchema.parse(config as unknown);
+    const pieceConfig = result.piece_config as Record<string, unknown> | undefined;
+    const provider = pieceConfig?.provider as Record<string, unknown> | undefined;
+    expect(provider?.type).toBe('codex');
+    expect(provider?.model).toBe('gpt-5.3');
+    expect(provider?.network_access).toBe(true);
   });
 
   it('should parse piece-level piece_config.provider_options', () => {
@@ -231,7 +361,11 @@ describe('PieceConfigRawSchema', () => {
               args: ['-y', '@anthropic-ai/mcp-server-playwright'],
             },
           },
-          allowed_tools: ['mcp__playwright__*'],
+          provider_options: {
+            claude: {
+              allowed_tools: ['mcp__playwright__*'],
+            },
+          },
           instruction: '{task}',
         },
       ],
@@ -353,6 +487,18 @@ describe('PieceConfigRawSchema', () => {
 
     expect(() => PieceConfigRawSchema.parse(config)).toThrow();
   });
+
+  it('should reject movement-level allowed_tools', () => {
+    const movement = {
+      name: 'step1',
+      persona: 'coder',
+      allowed_tools: ['Read'],
+      instruction: '{task}',
+    };
+
+    const result = PieceMovementRawSchema.safeParse(movement);
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('McpServerConfigSchema', () => {
@@ -468,21 +614,115 @@ describe('GlobalConfigSchema', () => {
     const config = {};
     const result = GlobalConfigSchema.parse(config);
 
-    expect(result.log_level).toBe('info');
     expect(result.provider).toBe('claude');
-    expect(result.observability).toBeUndefined();
+    expect(result.logging).toBeUndefined();
   });
 
-  it('should accept valid config', () => {
+  it('should accept valid logging config', () => {
     const config = {
-      log_level: 'debug' as const,
+      logging: {
+        provider_events: false,
+        usage_events: true,
+      },
+    };
+
+    const result = GlobalConfigSchema.parse(config);
+    expect(result.logging?.provider_events).toBe(false);
+    expect(result.logging?.usage_events).toBe(true);
+  });
+
+  it('should accept full logging config with all fields', () => {
+    const config = {
+      logging: {
+        level: 'debug',
+        trace: true,
+        debug: true,
+        provider_events: true,
+        usage_events: false,
+      },
+    };
+
+    const result = GlobalConfigSchema.parse(config);
+    expect(result.logging?.level).toBe('debug');
+    expect(result.logging?.trace).toBe(true);
+    expect(result.logging?.debug).toBe(true);
+    expect(result.logging?.provider_events).toBe(true);
+    expect(result.logging?.usage_events).toBe(false);
+  });
+
+  it('should accept partial logging config', () => {
+    const config = {
+      logging: {
+        level: 'warn',
+      },
+    };
+
+    const result = GlobalConfigSchema.parse(config);
+    expect(result.logging?.level).toBe('warn');
+    expect(result.logging?.trace).toBeUndefined();
+    expect(result.logging?.debug).toBeUndefined();
+    expect(result.logging?.provider_events).toBeUndefined();
+    expect(result.logging?.usage_events).toBeUndefined();
+  });
+
+  it('should reject invalid logging level', () => {
+    const config = {
+      logging: {
+        level: 'verbose',
+      },
+    };
+
+    expect(() => GlobalConfigSchema.parse(config)).toThrow();
+  });
+
+  it('should reject observability key (strict schema rejects unknown keys)', () => {
+    const config = {
       observability: {
         provider_events: false,
       },
     };
 
-    const result = GlobalConfigSchema.parse(config);
-    expect(result.log_level).toBe('debug');
-    expect(result.observability?.provider_events).toBe(false);
+    expect(() => GlobalConfigSchema.parse(config)).toThrow();
+  });
+
+  it('should parse global provider object block', () => {
+    const result = GlobalConfigSchema.parse({
+      provider: {
+        type: 'codex',
+        model: 'gpt-5.3',
+        network_access: true,
+      },
+    } as unknown);
+    const provider = (result as Record<string, unknown>).provider as Record<string, unknown> | undefined;
+    expect(provider?.type).toBe('codex');
+    expect(provider?.model).toBe('gpt-5.3');
+    expect(provider?.network_access).toBe(true);
+  });
+
+  it('should reject persona_providers because it is project-local only', () => {
+    expect(() => GlobalConfigSchema.parse({
+      persona_providers: {
+        coder: {
+          type: 'codex',
+          network_access: true,
+        },
+      },
+    } as unknown)).toThrow();
+  });
+});
+
+describe('ProjectConfigSchema', () => {
+  it('should parse project provider object block', () => {
+    const result = ProjectConfigSchema.parse({
+      provider: {
+        type: 'codex',
+        model: 'gpt-5.3',
+        network_access: false,
+      },
+    } as unknown);
+    const provider = (result as Record<string, unknown>).provider as Record<string, unknown> | undefined;
+    expect(provider?.type).toBe('codex');
+    expect(provider?.model).toBe('gpt-5.3');
+    expect(provider?.network_access).toBe(false);
   });
 });

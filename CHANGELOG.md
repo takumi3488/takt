@@ -6,6 +6,159 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.32.1] - 2026-03-14
+
+### Fixed
+
+- `--pr` 経由のタスクで `autoPr` が無効になっていたため origin push がスキップされる問題を修正
+- PR レビューコメントの取得が `gh pr view` の `reviews.comments` に依存していたため、インラインコメントを取りこぼす問題を修正。GitHub REST API によるページネーション取得に変更 (#489)
+- config のパス指定で `~` チルダ展開が効かない問題を修正（`worktree_dir`、`*_cli_path`、`analytics.events_path` 等） (#496)
+- auto-commit 時に git hooks/filter がそのまま実行され、TAKT 管理下のコミットが意図しない hooks の影響を受ける問題を修正。デフォルトで無効化し、`allow_git_hooks` / `allow_git_filters` で opt-in に変更 (#503)
+- インタラクティブモードで初回入力時に不要な AI 呼び出しが発生していた問題を修正 (#504)
+- Cursor provider でプロンプト文字列が CLI オプションとして解釈される可能性がある問題を修正（`--` セパレータを追加） (#500)
+- snapshot ファイル名にムーブメント名がそのまま使われ、パストラバーサルが可能だった問題を修正 (#498)
+- `provider_options` の優先順位で、環境変数・プロジェクト設定がムーブメント定義より低くなっていた問題を修正（セキュリティ設定がムーブメントで上書きされないよう変更） (#497)
+- worktree パスの再利用時に、クローンベースディレクトリ外のパスが受け入れられる問題を修正 (#502)
+- terraform ピースから不要な強制 full パーミッションを削除 (#507)
+
+### Internal
+
+- テスト系ピース・ファセットの全面整備（e2e-test → fill-e2e、unit-test → fill-unit にリネーム、ナレッジ・ポリシー追加）
+- デザイン忠実度ポリシーの追加とフロントエンド系ピースへの統合
+- security-audit ピースの追加
+- ファセットデプロイメントのリファクタリング（templates ディレクトリの廃止、facets ディレクトリへの統合） (#505)
+- `isPathInside` ユーティリティを追加し、クローン削除・worktree 再利用のパス検証を強化
+- ループモニターの閾値調整とレビューポリシーの改善
+
+## [0.32.0] - 2026-03-09
+
+### Added
+
+- `takt export-codex` コマンド: ピース/ファセットを Codex スキルとしてエクスポート (`~/.agents/skills/takt/`) (#475)
+- `frontend` / `backend` / `backend-cqrs` ピースにテストファースト（`write_tests`）ムーブメントを追加し、レビューを2段階化（Stage 1: 構造・実装品質 → Stage 2: 安全性・品質保証）
+- セキュリティナレッジにログ・マスキングセクションを追加（パスワード露出、`toString()` によるフィールド漏洩の検出基準）
+- CQRS+ES ナレッジにマスタデータと CRUD の使い分けセクションを追加（6つの判断基準テーブル付き）
+- `/ci` コメントで PR の CI を手動トリガーするワークフローを追加
+- devcontainer で worktree クローン先の親ディレクトリが書き込み不可の場合に `.takt/worktrees/` へフォールバック
+- インタラクティブモードのアシスタントが設計判断を勝手にしないようポリシーを追加
+
+### Changed
+
+- BREAKING: ピース YAML の `instruction_template` フィールドを非推奨化。`instruction` に統一（後方互換あり、deprecated 警告を表示） (#476)
+- レビュー系ピースの命名規則を `review-{variant}` / `review-fix-{variant}` に統一
+- タスク分解の REJECT 基準をナレッジからポリシーに分離
+- faceted-prompting を npm パッケージ (`@anthropic-ai/faceted-prompting`) に移行し、内蔵コードを削除
+
+### Fixed
+
+- `takt run` の Slack 通知が当該 run で実行したタスクのみを送信するよう修正（従来は全タスクを通知していた）
+- `ProviderPermissionProfilesSchema` に `copilot` が欠落していた問題を修正 (#487)
+- PR fix フローで既存ブランチ存在時に `baseBranch` 検証をスキップするよう修正
+- `review-fix-takt-default` の fix 後フローを `takt-default` と統一
+- `write-tests-first` インストラクションからビルド検証手順を削除
+- `cc-resolve` ワークフローに `actions: write` パーミッションを追加
+
+### Internal
+
+- SDK 依存パッケージを最新化
+- `deploySkill` のコア処理を `deploySkillInternal` に抽出し、`deploySkillCodex` と共有
+- clone ブランチ解決をリモートブランチ対応に拡張（`localBranchExists` / `remoteBranchExists` に分離）
+- README の起動フローを整理し「タスクにつむ」を通常フローとして記載
+
+## [0.31.0] - 2026-03-06
+
+### Changed
+
+- `dual` ピースを大幅強化: テストファースト（`write_tests`）ムーブメント追加、`implement` を team_leader 化（FE/BE 分割）、レビューを2段階化（`reviewers_1`: arch/frontend/testing → `reviewers_2`: security/qa/requirements）
+- `takt-default-team-leader` ピースを `takt-default` に統合し削除。`takt-default` の `implement` を team_leader 化
+- `quality_gates` のペルソナ単位オーバーライドをサポート: `piece_overrides.personas.<name>.qualityGates` で特定ペルソナのムーブメントに品質ゲートを追加可能に (#472)
+- Status 型を `done` / `blocked` / `error` の3値に整理し、ステータスハンドリングを厳格化。`blocked` / `error` 時は即座に ABORT するよう変更 (#477)
+
+### Fixed
+
+- `git check-ref-format` コマンドから不要な `--` を削除し、ブランチ名の検証が正しく動作するよう修正 (#481)
+- `log_level` → `logging.level` の設定キー不整合を修正（E2E テスト全滅の原因）
+- Phase 3 ステータス判定が失敗した際に Phase 1 のルール評価にフォールバックするよう修正（従来はエラーで中断していた） (#474)
+- Parallel ムーブメントの Phase 3 判定失敗時も同様にフォールバック対応 (#474)
+- タスクリトライ・追加指示時のピース名取得元を `runInfo?.piece` から `task.data?.piece` に変更（worktree 内で `runInfo` が常に null になる問題を修正）
+
+### Internal
+
+- config 3層モデルの整理: `PersistedGlobalConfig` → `GlobalConfig` にリネーム、マイグレーション用フォールバック処理を削除、`persisted-global-config.ts` → `config-types.ts` にリネーム
+- supervisor ペルソナからインラインの知識・ポリシーをファセットファイルに分離
+- team leader の分解品質を改善するナレッジ（`task-decomposition.md`）とインストラクション（`dual-team-leader-implement.md`）を追加
+- `~/.takt/config.yaml` テンプレートに不足していた設定項目を追加
+- Provider Sandbox & Permission ガイドのドキュメントを拡充
+
+## [0.30.0] - 2026-03-05
+
+### Added
+
+- トレースレポートの自動生成: piece 実行完了時に movement の遷移・フェーズ・ルール評価結果を Markdown レポートとして `.takt/runs/` に自動出力。`logging.trace: true` で全文モード、デフォルトは redacted モード (#467)
+- 使用量イベントログ: プロバイダー呼び出しごとのトークン使用量を NDJSON 形式で記録。`logging.usage_events: true` で有効化 (#470)
+- タスクリトライ時のピース再利用確認: `takt list` からリトライ・追加指示する際に、前回と同じピースを使うか選び直すかを選択可能に (#468)
+
+### Changed
+
+- BREAKING: `takt switch` コマンドを削除。ピース選択はインタラクティブモード起動時（`takt`）に毎回行う方式に変更 (#465)
+- Claude プロバイダーの `allowed_tools` をビルトインピースの YAML 定義からエグゼキューター側に移動し、ピース YAML の簡素化と保守性を向上 (#469)
+- 設定構造をリファクタリング: `globalConfig.ts` を `globalConfigCore.ts`・`globalConfigAccessors.ts`・`globalConfigResolvers.ts`・`globalConfigSerializer.ts` に分割。プロジェクトローカル設定（`.takt/config.yaml`）のフォールバック優先度を明確化 (#460)
+- observability モジュールを `core/logging/` に再編成: `providerEventLogger` と `usageEventLogger` を統一的なログ基盤として整理 (#466)
+- レビュアー全体に `coder-decisions.md` の参照を追加し、コーダーの設計判断を考慮したレビューで誤検知を抑制
+- レビュー↔修正ループの収束を支援: レポート履歴の参照、ループモニター、修正方針のガイドラインを整備
+
+### Fixed
+
+- runtime 環境の `XDG_CONFIG_HOME` 上書きで `gh` CLI の認証が失敗する問題を修正。`GH_CONFIG_DIR` を元の設定から保持するよう変更
+- `.takt/config.yaml` に `runtime.prepare` を記述するとエラーになる問題を修正（プロジェクトレベルでの runtime 設定を許可） (#464)
+- インタラクティブモードで iteration limit 到達時にプロンプトが表示されず、exceeded 状態が保持されない問題を修正
+- PR 作成失敗時のタスクステータスを `failed` から `pr_failed` に分離し、実行成功だが PR 作成のみ失敗したケースを区別可能に
+- リトライ時にタスクにピース情報が引き継がれるよう修正
+- `.gitignore` の `.takt/` ディレクトリ ignore を削除し `.takt/.gitignore` に委譲（プロジェクト設定ファイルの追跡を可能に）
+- CI: push トリガーから `takt/**` を削除し二重実行を防止
+- `cc-resolve` ワークフローで push 後に CI を自動トリガーするよう修正
+
+### Internal
+
+- deprecated config マイグレーション処理を削除
+- プロジェクトローカル設定の優先度に関する統合テストを追加
+- テストヘルパーとテストセットアップの改善
+
+## [0.29.0] - 2026-03-04
+
+### Added
+
+- レビュー＋修正ループピース群を追加: `review-fix`（多角レビュー）、`frontend-review-fix`、`backend-review-fix`、`dual-review-fix`、`dual-cqrs-review-fix`、`backend-cqrs-review-fix` および対応するレビュー専用ピース群を追加。コードレビューと自動修正を反復するワークフロー
+- `takt-default-review-fix` ピースを追加: TAKT 自己開発向けのレビュー＋修正ループワークフロー
+- `quality_gates` のグローバル/プロジェクトレベルオーバーライドをサポート: `~/.takt/config.yaml` および `.takt/config.yaml` の `piece_overrides.quality_gates` でビルトインピースの品質ゲートを上書き可能に (#384)
+- タスクの `base_branch` 設定: `takt add` 時に現在のブランチを base_branch として記録し、タスク実行時にそのブランチから分岐するよう設定可能に (#455)
+- プロバイダー設定の統一: `.takt/config.yaml` で `provider` ブロックに `type`/`model`/プロバイダー固有オプション（`network_access` 等）をまとめて記述可能に (#457)
+- ワーカープール超過時のリキュー: タスク実行がワーカー上限を超えた場合、タスクを自動的に再キューイングするよう対応 (#366)
+- `--pr` インタラクティブモードで `create_issue` アクションを除外し、`save_task` 時に PR のブランチ名を `base_branch` として自動設定
+- team_leader の `decomposeTask`/`requestMoreParts`/Phase 3 ステータス判定のプロバイダーイベントをロギング: `provider-events.jsonl` に記録されるようになり、デバッグ・分析が可能に
+
+### Fixed
+
+- `export-cc` で `facets/` のサブディレクトリ構造（`personas/`、`policies/` 等）が出力先に再現されなかった問題を修正 (#8dcb23b)
+- `cc-resolve` コマンドがコンフリクト解決後にマージコミットを生成するよう修正 (#1b1f758)
+- グローバル設定 (`~/.takt/config.yaml`) の `piece` フィールドがピース解決チェーンで無視されるバグを修正 (#458)
+- Codex プロバイダーでプロバイダー優先のパーミッションモード解決が機能しない問題と EPERM エラーの E2E テストを追加 (#d2b48fd)
+- レビューコメントがない PR で `--pr` を使用した際にエラーになる問題を修正
+- `--auto-pr`/`--draft` オプションをパイプラインモード専用に制限（インタラクティブモードでの誤用を防止）
+- team_leader のストリーミングでバウンダリの先行フラッシュによる断片化を修正 (#769bd87, #bddb66f)
+- team_leader のエラーメッセージが空文字列になるバグを修正 (#52968ac)
+- `decomposeTask`/`requestMoreParts` の `maxTurns` を 2 から 4 に増加（複雑なタスク分解でタイムアウトしていた問題を緩和）
+- Copilot プロバイダーのクライアント実装のバグを修正 (#434)
+
+### Internal
+
+- E2E プロバイダー別テストをコンフィグレベル（`vitest.config.e2e.provider.ts`）で振り分けるよう変更。テストファイル内の `skip` ロジックを廃止し、JSON レポート出力を追加
+- 共有ノーマライザを `configNormalizers.ts` に抽出してプロバイダー設定解析を整理
+- `agent-usecases`/`schema-loader` を移動し `pieceExecution` の責務を分割
+- `check:release` で全プロバイダー（claude/codex/opencode）の E2E を実行するよう変更
+- CI: PR と push の重複実行を concurrency グループで抑制
+- CI: feature ブランチへの push と手動実行に対応
+
 ## [0.28.1] - 2026-03-02
 
 ### Changed

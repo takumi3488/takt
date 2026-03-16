@@ -128,11 +128,26 @@ export class PieceEngine extends EventEmitter {
       getRetryNote: () => this.options.retryNote,
       detectRuleIndex: this.detectRuleIndex,
       callAiJudge: this.callAiJudge,
-      onPhaseStart: (step, phase, phaseName, instruction) => {
-        this.emit('phase:start', step, phase, phaseName, instruction);
+      onPhaseStart: (step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:start', step, phase, phaseName, instruction, promptParts);
+          return;
+        }
+        this.emit('phase:start', step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration);
       },
-      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error) => {
-        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+          return;
+        }
+        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration);
+      },
+      onJudgeStage: (step, phase, phaseName, entry, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:judge_stage', step, phase, phaseName, entry);
+          return;
+        }
+        this.emit('phase:judge_stage', step, phase, phaseName, entry, phaseExecutionId, iteration);
       },
     });
 
@@ -145,11 +160,26 @@ export class PieceEngine extends EventEmitter {
       getInteractive: () => this.options.interactive === true,
       detectRuleIndex: this.detectRuleIndex,
       callAiJudge: this.callAiJudge,
-      onPhaseStart: (step, phase, phaseName, instruction) => {
-        this.emit('phase:start', step, phase, phaseName, instruction);
+      onPhaseStart: (step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:start', step, phase, phaseName, instruction, promptParts);
+          return;
+        }
+        this.emit('phase:start', step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration);
       },
-      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error) => {
-        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+          return;
+        }
+        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration);
+      },
+      onJudgeStage: (step, phase, phaseName, entry, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:judge_stage', step, phase, phaseName, entry);
+          return;
+        }
+        this.emit('phase:judge_stage', step, phase, phaseName, entry, phaseExecutionId, iteration);
       },
     });
 
@@ -160,11 +190,19 @@ export class PieceEngine extends EventEmitter {
       getInteractive: () => this.options.interactive === true,
       detectRuleIndex: this.detectRuleIndex,
       callAiJudge: this.callAiJudge,
-      onPhaseStart: (step, phase, phaseName, instruction) => {
-        this.emit('phase:start', step, phase, phaseName, instruction);
+      onPhaseStart: (step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:start', step, phase, phaseName, instruction, promptParts);
+          return;
+        }
+        this.emit('phase:start', step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration);
       },
-      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error) => {
-        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+          return;
+        }
+        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration);
       },
     });
 
@@ -176,11 +214,19 @@ export class PieceEngine extends EventEmitter {
       getInteractive: () => this.options.interactive === true,
       detectRuleIndex: this.detectRuleIndex,
       callAiJudge: this.callAiJudge,
-      onPhaseStart: (step, phase, phaseName, instruction) => {
-        this.emit('phase:start', step, phase, phaseName, instruction);
+      onPhaseStart: (step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:start', step, phase, phaseName, instruction, promptParts);
+          return;
+        }
+        this.emit('phase:start', step, phase, phaseName, instruction, promptParts, phaseExecutionId, iteration);
       },
-      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error) => {
-        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+      onPhaseComplete: (step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration) => {
+        if (phaseExecutionId == null && iteration == null) {
+          this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error);
+          return;
+        }
+        this.emit('phase:complete', step, phase, phaseName, content, phaseStatus, error, phaseExecutionId, iteration);
       },
     });
 
@@ -400,6 +446,14 @@ export class PieceEngine extends EventEmitter {
     throw new Error(`No matching rule found for movement "${step.name}" (status: ${response.status})`);
   }
 
+  private resolveNextMovementFromDone(step: PieceMovement, response: AgentResponse): string {
+    if (response.status !== 'done') {
+      throw new Error(`Unhandled response status: ${response.status}`);
+    }
+
+    return this.resolveNextMovement(step, response);
+  }
+
   /** Build instruction (public, used by pieceExecution.ts for logging) */
   buildInstruction(step: PieceMovement, movementIteration: number): string {
     return this.movementExecutor.buildInstruction(
@@ -408,10 +462,10 @@ export class PieceEngine extends EventEmitter {
   }
 
   /**
-   * Build the default instruction template for a loop monitor judge.
-   * Used when the monitor config does not specify a custom instruction_template.
+   * Build the default instruction for a loop monitor judge.
+   * Used when the monitor config does not specify a custom instruction.
    */
-  private buildDefaultJudgeInstructionTemplate(
+  private buildDefaultJudgeInstruction(
     monitor: LoopMonitorConfig,
     cycleCount: number,
     language: string,
@@ -459,11 +513,11 @@ export class PieceEngine extends EventEmitter {
     cycleCount: number,
   ): Promise<string> {
     const language = this.options.language ?? 'en';
-    const instructionTemplate = monitor.judge.instructionTemplate
-      ?? this.buildDefaultJudgeInstructionTemplate(monitor, cycleCount, language);
+    const instruction = monitor.judge.instruction
+      ?? this.buildDefaultJudgeInstruction(monitor, cycleCount, language);
 
-    // Replace {cycle_count} in custom templates
-    const processedTemplate = instructionTemplate.replace(/\{cycle_count\}/g, String(cycleCount));
+    // Replace {cycle_count} in custom instructions
+    const processedInstruction = instruction.replace(/\{cycle_count\}/g, String(cycleCount));
 
     // Build a synthetic PieceMovement for the judge
     const judgeMovement: PieceMovement = {
@@ -472,13 +526,17 @@ export class PieceEngine extends EventEmitter {
       personaPath: monitor.judge.personaPath,
       personaDisplayName: 'loop-judge',
       edit: false,
-      instructionTemplate: processedTemplate,
+      providerOptions: {
+        claude: {
+          allowedTools: ['Read', 'Glob', 'Grep'],
+        },
+      },
+      instruction: processedInstruction,
       rules: monitor.judge.rules.map((r) => ({
         condition: r.condition,
         next: r.next,
       })),
       passPreviousResponse: true,
-      allowedTools: ['Read', 'Glob', 'Grep'],
     };
 
     log.info('Running loop monitor judge', {
@@ -495,7 +553,7 @@ export class PieceEngine extends EventEmitter {
 
     this.emit('movement:start', judgeMovement, this.state.iteration, prebuiltInstruction, this.optionsBuilder.resolveStepProviderModel(judgeMovement));
 
-    const { response, instruction } = await this.movementExecutor.runNormalMovement(
+    const { response, instruction: executedInstruction } = await this.movementExecutor.runNormalMovement(
       judgeMovement,
       this.state,
       this.task,
@@ -504,10 +562,10 @@ export class PieceEngine extends EventEmitter {
       prebuiltInstruction,
     );
     this.emitCollectedReports();
-    this.emit('movement:complete', judgeMovement, response, instruction);
+    this.emit('movement:complete', judgeMovement, response, executedInstruction);
 
     // Resolve next movement from the judge's rules
-    const nextMovement = this.resolveNextMovement(judgeMovement, response);
+    const nextMovement = this.resolveNextMovementFromDone(judgeMovement, response);
 
     log.info('Loop monitor judge decision', {
       cycle: monitor.cycle,
@@ -608,7 +666,7 @@ export class PieceEngine extends EventEmitter {
           break;
         }
 
-        let nextMovement = this.resolveNextMovement(movement, response);
+        let nextMovement = this.resolveNextMovementFromDone(movement, response);
         log.debug('Movement transition', {
           from: movement.name,
           status: response.status,
@@ -714,7 +772,21 @@ export class PieceEngine extends EventEmitter {
 
     this.state.iteration++;
     const { response } = await this.runMovement(movement);
-    const nextMovement = this.resolveNextMovement(movement, response);
+
+    if (response.status === 'blocked') {
+      this.state.status = 'aborted';
+      this.emit('piece:abort', this.state, 'Piece blocked and no user input provided');
+      return { response, nextMovement: ABORT_MOVEMENT, isComplete: true, loopDetected: loopCheck.isLoop };
+    }
+
+    if (response.status === 'error') {
+      const detail = response.error ?? response.content;
+      this.state.status = 'aborted';
+      this.emit('piece:abort', this.state, `Movement "${movement.name}" failed: ${detail}`);
+      return { response, nextMovement: ABORT_MOVEMENT, isComplete: true, loopDetected: loopCheck.isLoop };
+    }
+
+    const nextMovement = this.resolveNextMovementFromDone(movement, response);
     const isComplete = nextMovement === COMPLETE_MOVEMENT || nextMovement === ABORT_MOVEMENT;
 
     if (response.matchedRuleIndex != null && movement.rules) {

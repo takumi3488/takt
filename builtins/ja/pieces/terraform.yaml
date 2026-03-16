@@ -13,13 +13,15 @@ movements:
     edit: false
     persona: planner
     knowledge: terraform-aws
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Bash
+          - WebSearch
+          - WebFetch
     rules:
       - condition: 要件が明確で実装可能
         next: implement
@@ -38,16 +40,17 @@ movements:
     policy:
       - terraform
     knowledge: terraform-aws
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
-    required_permission_mode: full
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     quality_gates:
       - terraform fmt -check がエラーなし
       - terraform validate が成功
@@ -77,13 +80,15 @@ movements:
           - review
           - terraform
         knowledge: terraform-aws
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Bash
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         instruction: review-terraform
         rules:
           - condition: Terraform規約に準拠
@@ -98,12 +103,14 @@ movements:
         policy:
           - review
           - ai-antipattern
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - WebSearch
+              - WebFetch
         instruction: review-ai
         rules:
           - condition: AI特有の問題なし
@@ -122,13 +129,15 @@ movements:
     persona: supervisor
     policy: review
     knowledge: terraform-aws
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Bash
+          - WebSearch
+          - WebFetch
     instruction: supervise
     rules:
       - condition: レビュアー全員承認かつタスク要件充足
@@ -156,15 +165,16 @@ movements:
         policy:
           - terraform
         knowledge: terraform-aws
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Bash
-          - WebSearch
-          - WebFetch
-        required_permission_mode: full
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Edit
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: AI問題の修正完了
           - condition: 修正不要（指摘対象ファイル/仕様の確認済み）
@@ -176,15 +186,16 @@ movements:
         policy:
           - terraform
         knowledge: terraform-aws
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - Edit
-          - Bash
-          - WebSearch
-          - WebFetch
-        required_permission_mode: full
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Edit
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: 監督者の指摘に対する修正が完了した
           - condition: 修正を進行できない
@@ -200,16 +211,17 @@ movements:
     policy:
       - terraform
     knowledge: terraform-aws
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
-    required_permission_mode: full
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     pass_previous_response: false
     rules:
       - condition: AI問題の修正完了
@@ -225,16 +237,17 @@ movements:
     policy:
       - terraform
     knowledge: terraform-aws
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
-    required_permission_mode: full
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     pass_previous_response: false
     rules:
       - condition: 監督者の指摘に対する修正が完了した
@@ -247,7 +260,7 @@ loop_monitors:
     threshold: 3
     judge:
       persona: supervisor
-      instruction_template: |
+      instruction: |
         レビュー → 修正のサイクルが {cycle_count} 回繰り返されました。
         Report Directory 内のレビューレポート履歴を確認し、収束状況を判断してください。
 
@@ -264,7 +277,7 @@ loop_monitors:
     threshold: 3
     judge:
       persona: supervisor
-      instruction_template: |
+      instruction: |
         AI修正 → レビューのサイクルが {cycle_count} 回繰り返されました。
         Report Directory 内のレビューレポート履歴を確認し、収束状況を判断してください。
 
@@ -281,7 +294,7 @@ loop_monitors:
     threshold: 3
     judge:
       persona: supervisor
-      instruction_template: |
+      instruction: |
         監督修正 → レビューのサイクルが {cycle_count} 回繰り返されました。
         Report Directory 内のレビューレポート履歴を確認し、収束状況を判断してください。
 

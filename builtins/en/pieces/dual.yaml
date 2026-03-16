@@ -1,5 +1,5 @@
 name: dual
-description: Frontend + backend development piece with architecture, frontend, security, and QA reviews with fix loops
+description: Frontend + backend development piece with test-first, team leader implementation, AI review, 2-stage reviews, fix loops, and supervision
 piece_config:
   provider_options:
     codex:
@@ -15,59 +15,140 @@ loop_monitors:
     threshold: 3
     judge:
       persona: supervisor
-      instruction_template: loop-monitor-ai-fix
+      instruction: loop-monitor-ai-fix
       rules:
         - condition: Healthy (making progress)
           next: ai_review
-        - condition: Unproductive (same findings repeated or fixes not reflected)
-          next: ai_no_fix
+        - condition: Unproductive (no improvement)
+          next: reviewers_1
+  - cycle:
+      - reviewers_1
+      - fix
+    threshold: 3
+    judge:
+      persona: supervisor
+      instruction: loop-monitor-reviewers-fix
+      rules:
+        - condition: converging (findings decreasing, fixes applied)
+          next: reviewers_1
+        - condition: unproductive (same findings repeating)
+          next: supervise
 movements:
   - name: plan
     edit: false
     persona: planner
+    policy:
+      - design-planning
     knowledge:
       - frontend
       - backend
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Bash
+          - WebSearch
+          - WebFetch
     instruction: plan
     rules:
       - condition: Task analysis and planning is complete
-        next: implement
+        next: write_tests
       - condition: Requirements are unclear and planning cannot proceed
         next: ABORT
+        appendix: |
+          Questions:
+          - {question1}
+          - {question2}
     output_contracts:
       report:
         - name: plan.md
-          format: plan
+          format: plan-frontend
+  - name: write_tests
+    edit: true
+    persona: coder
+    policy:
+      - coding
+      - testing
+    knowledge:
+      - frontend
+      - backend
+      - architecture
+      - unit-testing
+      - e2e-testing
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
+    required_permission_mode: edit
+    instruction: write-tests-first
+    rules:
+      - condition: Test creation is complete
+        next: implement
+      - condition: Skipping test creation as target is not yet implemented
+        next: implement
+      - condition: Cannot proceed with test creation
+        next: plan
+      - condition: User input required for clarification
+        next: write_tests
+        requires_user_input: true
+        interactive_only: true
+    output_contracts:
+      report:
+        - name: test-scope.md
+          format: coder-scope
+        - name: test-decisions.md
+          format: coder-decisions
   - name: implement
     edit: true
     persona: coder
     policy:
       - coding
       - testing
+      - design-fidelity
     session: refresh
     knowledge:
       - frontend
       - backend
       - security
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
-    instruction: implement
+      - task-decomposition
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
+    required_permission_mode: edit
+    team_leader:
+      max_parts: 2
+      part_persona: coder
+      part_edit: true
+      part_permission_mode: edit
+      part_allowed_tools:
+        - Read
+        - Glob
+        - Grep
+        - Edit
+        - Write
+        - Bash
+        - WebSearch
+        - WebFetch
+    instruction: dual-team-leader-implement
     rules:
       - condition: Implementation is complete
         next: ai_review
@@ -91,16 +172,18 @@ movements:
     policy:
       - review
       - ai-antipattern
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - WebSearch
+          - WebFetch
     instruction: ai-review
     rules:
       - condition: No AI-specific issues found
-        next: reviewers
+        next: reviewers_1
       - condition: AI-specific issues detected
         next: ai_fix
     output_contracts:
@@ -113,21 +196,25 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     session: refresh
     knowledge:
       - frontend
       - backend
       - security
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
+    required_permission_mode: edit
     instruction: ai-fix
     pass_previous_response: false
     rules:
@@ -141,17 +228,19 @@ movements:
     edit: false
     persona: architecture-reviewer
     policy: review
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
     rules:
       - condition: ai_review's findings are valid (fix required)
         next: ai_fix
       - condition: ai_fix's judgment is valid (no fix needed)
-        next: reviewers
+        next: reviewers_1
     instruction: arbitrate
-  - name: reviewers
+  - name: reviewers_1
     parallel:
       - name: arch-review
         edit: false
@@ -160,12 +249,15 @@ movements:
         knowledge:
           - architecture
           - backend
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -177,14 +269,19 @@ movements:
       - name: frontend-review
         edit: false
         persona: frontend-reviewer
-        policy: review
+        policy:
+          - review
+          - design-fidelity
         knowledge: frontend
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -193,17 +290,53 @@ movements:
           report:
             - name: frontend-review.md
               format: frontend-review
+      - name: testing-review
+        edit: false
+        persona: testing-reviewer
+        policy:
+          - review
+          - testing
+        knowledge:
+          - unit-testing
+          - e2e-testing
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        rules:
+          - condition: approved
+          - condition: needs_fix
+        instruction: review-test
+        output_contracts:
+          report:
+            - name: testing-review.md
+              format: testing-review
+    rules:
+      - condition: all("approved")
+        next: reviewers_2
+      - condition: any("needs_fix")
+        next: fix
+  - name: reviewers_2
+    parallel:
       - name: security-review
         edit: false
         persona: security-reviewer
         policy: review
         knowledge: security
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -218,12 +351,15 @@ movements:
         policy:
           - review
           - qa
-        allowed_tools:
-          - Read
-          - Glob
-          - Grep
-          - WebSearch
-          - WebFetch
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
         rules:
           - condition: approved
           - condition: needs_fix
@@ -232,6 +368,27 @@ movements:
           report:
             - name: qa-review.md
               format: qa-review
+      - name: requirements-review
+        edit: false
+        persona: requirements-reviewer
+        policy: review
+        provider_options:
+          claude:
+            allowed_tools:
+              - Read
+              - Glob
+              - Grep
+              - Bash
+              - WebSearch
+              - WebFetch
+        rules:
+          - condition: approved
+          - condition: needs_fix
+        instruction: review-requirements
+        output_contracts:
+          report:
+            - name: requirements-review.md
+              format: requirements-review
     rules:
       - condition: all("approved")
         next: supervise
@@ -243,25 +400,28 @@ movements:
     policy:
       - coding
       - testing
+      - design-fidelity
     knowledge:
       - frontend
       - backend
       - security
       - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Edit
+          - Write
+          - Bash
+          - WebSearch
+          - WebFetch
     required_permission_mode: edit
     pass_previous_response: false
     rules:
       - condition: Fix complete
-        next: reviewers
+        next: reviewers_1
       - condition: Cannot proceed, insufficient info
         next: plan
     instruction: fix
@@ -269,19 +429,23 @@ movements:
     edit: false
     persona: dual-supervisor
     policy: review
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - WebSearch
-      - WebFetch
+    knowledge: architecture
+    provider_options:
+      claude:
+        allowed_tools:
+          - Read
+          - Glob
+          - Grep
+          - Bash
+          - WebSearch
+          - WebFetch
     instruction: supervise
     pass_previous_response: false
     rules:
       - condition: All validations pass and ready to merge
         next: COMPLETE
       - condition: Issues detected during final review
-        next: fix_supervisor
+        next: plan
     output_contracts:
       report:
         - name: supervisor-validation.md
@@ -289,30 +453,3 @@ movements:
         - name: summary.md
           format: summary
           use_judge: false
-  - name: fix_supervisor
-    edit: true
-    persona: coder
-    policy:
-      - coding
-      - testing
-    knowledge:
-      - frontend
-      - backend
-      - security
-      - architecture
-    allowed_tools:
-      - Read
-      - Glob
-      - Grep
-      - Edit
-      - Write
-      - Bash
-      - WebSearch
-      - WebFetch
-    instruction: fix-supervisor
-    pass_previous_response: false
-    rules:
-      - condition: Supervisor's issues have been fixed
-        next: supervise
-      - condition: Unable to proceed with fixes
-        next: plan

@@ -23,15 +23,22 @@ describe('providerEventLogger', () => {
   it('should disable provider events by default', () => {
     expect(isProviderEventsEnabled()).toBe(false);
     expect(isProviderEventsEnabled({})).toBe(false);
-    expect(isProviderEventsEnabled({ observability: {} })).toBe(false);
+    expect(isProviderEventsEnabled({ logging: {} })).toBe(false);
   });
 
   it('should enable provider events only when explicitly true', () => {
-    expect(isProviderEventsEnabled({ observability: { providerEvents: true } })).toBe(true);
+    expect(isProviderEventsEnabled({ logging: { providerEvents: true } })).toBe(true);
   });
 
   it('should disable provider events only when explicitly false', () => {
-    expect(isProviderEventsEnabled({ observability: { providerEvents: false } })).toBe(false);
+    expect(isProviderEventsEnabled({ logging: { providerEvents: false } })).toBe(false);
+  });
+
+  it('should not enable provider events from legacy observability key', () => {
+    const legacyOnlyConfig = {
+      observability: { providerEvents: true },
+    } as unknown as Parameters<typeof isProviderEventsEnabled>[0];
+    expect(isProviderEventsEnabled(legacyOnlyConfig)).toBe(false);
   });
 
   it('should write normalized JSONL records when enabled', () => {
@@ -85,6 +92,20 @@ describe('providerEventLogger', () => {
     expect(parsed.message_id).toBe('msg-123');
     expect(parsed.request_id).toBe('req-123');
     expect(parsed.data['tool']).toBe('Read');
+  });
+
+  it('should keep provider-events filename suffix for backward compatibility', () => {
+    const logger = createProviderEventLogger({
+      logsDir: tempDir,
+      sessionId: 'session-compat',
+      runId: 'run-compat',
+      provider: 'claude',
+      movement: 'plan',
+      enabled: true,
+    });
+
+    expect(logger.filepath.endsWith('-provider-events.jsonl')).toBe(true);
+    expect(logger.filepath.endsWith('-usage-events.jsonl')).toBe(false);
   });
 
   it('should update movement and provider for subsequent events', () => {
@@ -153,6 +174,31 @@ describe('providerEventLogger', () => {
 
     expect(parsed.data.text.length).toBeLessThan(longText.length);
     expect(parsed.data.text).toContain('...[truncated]');
+  });
+
+  it('should report file write failures to stderr only once', () => {
+    const logger = createProviderEventLogger({
+      logsDir: join(tempDir, 'missing', 'nested'),
+      sessionId: 'session-err',
+      runId: 'run-err',
+      provider: 'claude',
+      movement: 'plan',
+      enabled: true,
+    });
+
+    const original = vi.fn();
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      const wrapped = logger.wrapCallback(original);
+      wrapped({ type: 'text', data: { text: 'first' } });
+      wrapped({ type: 'text', data: { text: 'second' } });
+
+      expect(original).toHaveBeenCalledTimes(2);
+      expect(stderrSpy).toHaveBeenCalledTimes(1);
+      expect(stderrSpy.mock.calls[0]?.[0]).toContain('Failed to write provider event log');
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   it('should write init event records with typed data objects', () => {

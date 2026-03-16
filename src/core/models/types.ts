@@ -16,6 +16,7 @@ export type {
 // Agent response
 export type {
   AgentResponse,
+  ProviderUsageSnapshot,
 } from './response.js';
 
 // Session state (authoritative definition with createSessionState)
@@ -63,8 +64,8 @@ export type {
 export type {
   PersonaProviderEntry,
   CustomAgentConfig,
-  ObservabilityConfig,
+  LoggingConfig,
   Language,
   PipelineConfig,
   ProjectConfig,
-} from './persisted-global-config.js';
+} from './config-types.js';
